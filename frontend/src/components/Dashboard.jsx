@@ -38,6 +38,7 @@ export default function Dashboard() {
     const [showEditor, setShowEditor] = useState(false);
     const [editorContent, setEditorContent] = useState('');
     const [editorFile, setEditorFile] = useState(null);
+    const [editorFilePath, setEditorFilePath] = useState(''); // Full path to the file being edited
     const [editorSaving, setEditorSaving] = useState(false);
     const [socket, setSocket] = useState(null);
     const [activeUsers, setActiveUsers] = useState([]);
@@ -464,6 +465,7 @@ export default function Dashboard() {
             const response = await api.get(`/files/${path}`, { responseType: 'text' });
             setEditorContent(response.data);
             setEditorFile(item);
+            setEditorFilePath(path); // Store the full path
             setShowEditor(true);
 
             // Connect to WebSocket
@@ -520,15 +522,20 @@ export default function Dashboard() {
 
         setEditorSaving(true);
         try {
-            const path = currentPath ? `${currentPath}/${editorFile.name}` : editorFile.name;
+            // Use the stored file path to save to the correct location
+            const pathParts = editorFilePath.split('/');
+            const fileName = pathParts.pop(); // Get filename
+            const directory = pathParts.join('/'); // Get directory path
+
             const blob = new Blob([editorContent], { type: 'text/plain' });
             const formData = new FormData();
-            formData.append('files', blob, editorFile.name);
+            formData.append('files', blob, fileName);
 
-            await api.post(`/upload/${currentPath || ''}`, formData);
+            await api.post(`/upload/${directory}`, formData);
             setShowEditor(false);
             setEditorContent('');
             setEditorFile(null);
+            setEditorFilePath('');
             fetchItems();
             alert('File saved successfully');
         } catch (err) {
