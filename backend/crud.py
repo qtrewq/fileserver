@@ -7,6 +7,13 @@ def get_user(db: Session, username: str):
 def get_users(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.User).offset(skip).limit(limit).all()
 
+def count_enabled_super_admins(db: Session) -> int:
+    """Count the number of enabled users in the 'super_admins' group."""
+    return db.query(models.User).join(models.User.groups).filter(
+        models.Group.name == 'super_admins',
+        models.User.is_disabled == False
+    ).count()
+
 def create_user(db: Session, user: schemas.UserCreate):
     hashed_password = auth.get_password_hash(user.password)
     db_user = models.User(

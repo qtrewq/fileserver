@@ -241,6 +241,15 @@ def delete_user(username: str, db: Session = Depends(get_db), current_user: mode
         raise HTTPException(status_code=403, detail="Not authorized")
     if username == current_user.username:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    
+    target_user = crud.get_user(db, username)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    if is_super_admin(target_user):
+        if crud.count_enabled_super_admins(db) <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last enabled super admin")
+            
     crud.delete_user(db, username)
     return {"status": "deleted"}
 
@@ -263,6 +272,19 @@ def update_user(
         existing_user = crud.get_user(db, user_update.username)
         if existing_user:
             raise HTTPException(status_code=400, detail="Username already exists")
+            
+    # Check if disabling or removing super admin status from the last super admin
+    if is_super_admin(db_user):
+        # If disabling
+        if user_update.is_disabled and not db_user.is_disabled:
+            if crud.count_enabled_super_admins(db) <= 1:
+                raise HTTPException(status_code=400, detail="Cannot disable the last enabled super admin")
+        
+        # If removing group
+        if user_update.groups is not None:
+            if 'super_admins' not in user_update.groups:
+                if crud.count_enabled_super_admins(db) <= 1:
+                    raise HTTPException(status_code=400, detail="Cannot remove super admin privileges from the last enabled super admin")
     
     updated_user = crud.update_user(db, username, user_update)
     return updated_user
@@ -487,6 +509,10 @@ def update_group(group_name: str, group: schemas.GroupUpdate, db: Session = Depe
 def delete_group(group_name: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Not authorized")
+        
+    if group_name in ['admins', 'super_admins']:
+        raise HTTPException(status_code=400, detail="Cannot delete system groups")
+        
     db_group = crud.get_group(db, group_name=group_name)
     if not db_group:
         raise HTTPException(status_code=404, detail="Group not found")
