@@ -462,7 +462,8 @@ export default function Dashboard() {
 
         try {
             const path = currentPath ? `${currentPath}/${item.name}` : item.name;
-            const response = await api.get(`/files/${path}`, { responseType: 'text' });
+            // Add cache busting to prevent loading stale content
+            const response = await api.get(`/files/${path}?_=${Date.now()}`, { responseType: 'text' });
             setEditorContent(response.data);
             setEditorFile(item);
             setEditorFilePath(path); // Store the full path
