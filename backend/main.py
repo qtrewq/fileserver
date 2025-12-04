@@ -403,6 +403,55 @@ async def upload_files(
             if ext not in allowed_set:
                  raise HTTPException(status_code=403, detail=f"File type not allowed: {ext}")
 
+    try:
+        safe_path = get_safe_path(current_user, path)
+        os.makedirs(safe_path, exist_ok=True)
+        
+        uploaded_files = []
+        total_size = 0
+        
+        for file in files:
+            # Check individual file size
+            file_content = await file.read()
+            file_size = len(file_content)
+            
+            if file_size > MAX_FILE_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File {file.filename} exceeds maximum size of {MAX_FILE_SIZE_MB}MB"
+                )
+            
+            total_size += file_size
+            
+            # Check total upload size
+            if total_size > MAX_TOTAL_UPLOAD_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Total upload size exceeds maximum of {MAX_TOTAL_UPLOAD_SIZE_MB}MB"
+                )
+            
+            # Handle folder structure - filename may contain relative path like "folder/subfolder/file.txt"
+            # This happens when using webkitdirectory attribute
+            file_relative_path = file.filename.replace('\\', '/')  # Normalize path separators
+            full_file_path = os.path.join(safe_path, file_relative_path)
+            
+            # Security check for the relative path
+            if not os.path.abspath(full_file_path).startswith(safe_path):
+                 print(f"Skipping unsafe file path: {file.filename}")
+                 continue
+
+            # Create parent directories if they don't exist
+            try:
+                os.makedirs(os.path.dirname(full_file_path), exist_ok=True)
+            except OSError as e:
+                 raise HTTPException(status_code=500, detail=f"[ERR_DIR_CREATE] Failed to create directory for file: {str(e)}")
+            
+            try:
+                with open(full_file_path, "wb") as f:
+                    f.write(file_content)
+                uploaded_files.append(file_relative_path)
+            except OSError as e:
+                raise HTTPException(status_code=500, detail=f"[ERR_FILE_WRITE] Failed to write file {file.filename}: {str(e)}")
         
         return {"status": "uploaded", "files": uploaded_files}
     except HTTPException as e:
