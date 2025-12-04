@@ -523,7 +523,7 @@ export default function Dashboard() {
             const path = currentPath ? `${currentPath}/${editorFile.name}` : editorFile.name;
             const blob = new Blob([editorContent], { type: 'text/plain' });
             const formData = new FormData();
-            formData.append('file', blob, editorFile.name);
+            formData.append('files', blob, editorFile.name);
 
             await api.post(`/upload/${currentPath || ''}`, formData);
             setShowEditor(false);
@@ -532,7 +532,8 @@ export default function Dashboard() {
             fetchItems();
             alert('File saved successfully');
         } catch (err) {
-            alert('Failed to save file');
+            console.error('Save error:', err);
+            alert(`Failed to save file: ${err.response?.data?.detail || err.message}`);
         } finally {
             setEditorSaving(false);
         }
