@@ -22,6 +22,35 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 login_attempts = {}  # {username: {"count": int, "last_attempt": datetime, "locked_until": datetime}}
 ip_attempts = {}  # {ip: {"count": int, "last_attempt": datetime}}
 
+# Password requirements
+MIN_PASSWORD_LENGTH = int(os.getenv("MIN_PASSWORD_LENGTH", "8"))
+REQUIRE_UPPERCASE = os.getenv("REQUIRE_UPPERCASE", "true").lower() == "true"
+REQUIRE_LOWERCASE = os.getenv("REQUIRE_LOWERCASE", "true").lower() == "true"
+REQUIRE_DIGIT = os.getenv("REQUIRE_DIGIT", "true").lower() == "true"
+REQUIRE_SPECIAL_CHAR = os.getenv("REQUIRE_SPECIAL_CHAR", "false").lower() == "true"
+
+def validate_password(password: str) -> tuple[bool, str]:
+    """
+    Validate password against security requirements.
+    Returns (is_valid, error_message)
+    """
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return False, f"Password must be at least {MIN_PASSWORD_LENGTH} characters long"
+    
+    if REQUIRE_UPPERCASE and not any(c.isupper() for c in password):
+        return False, "Password must contain at least one uppercase letter"
+    
+    if REQUIRE_LOWERCASE and not any(c.islower() for c in password):
+        return False, "Password must contain at least one lowercase letter"
+    
+    if REQUIRE_DIGIT and not any(c.isdigit() for c in password):
+        return False, "Password must contain at least one digit"
+    
+    if REQUIRE_SPECIAL_CHAR and not any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password):
+        return False, "Password must contain at least one special character"
+    
+    return True, ""
+
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
