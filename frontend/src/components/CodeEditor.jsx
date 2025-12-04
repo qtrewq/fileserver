@@ -224,9 +224,9 @@ const CodeEditor = ({ value, onChange, language = 'javascript', readOnly = false
                                                 style={{ backgroundColor: cursor.color }}
                                             />
 
-                                            {/* Name Tag */}
+                                            {/* Name Tag - Always Visible */}
                                             <div
-                                                className="absolute top-0 left-0 -mt-6 px-2 py-0.5 rounded text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+                                                className="absolute top-0 left-0 -mt-6 px-2 py-0.5 rounded text-xs text-white whitespace-nowrap shadow-lg"
                                                 style={{ backgroundColor: cursor.color }}
                                             >
                                                 {cursor.username}

@@ -14,16 +14,21 @@ import json
 
 class ConnectionManager:
     def __init__(self):
-        # Map file_path -> list of {websocket, username}
+        # Map file_path -> list of {websocket, username, cursor_position}
         self.active_connections: dict[str, List[dict]] = {}
 
     async def connect(self, websocket: WebSocket, file_path: str, username: str):
         await websocket.accept()
         if file_path not in self.active_connections:
             self.active_connections[file_path] = []
-        self.active_connections[file_path].append({"websocket": websocket, "username": username})
-        # Send current user list
+        self.active_connections[file_path].append({
+            "websocket": websocket, 
+            "username": username,
+            "cursor_position": 0
+        })
+        # Send current user list and cursor positions
         await self.broadcast_user_list(file_path)
+        await self.broadcast_cursors(file_path)
 
     def disconnect(self, websocket: WebSocket, file_path: str):
         if file_path in self.active_connections:
@@ -43,6 +48,29 @@ class ConnectionManager:
                     await connection["websocket"].send_text(message)
                 except:
                     pass
+
+    async def broadcast_cursors(self, file_path: str):
+        """Broadcast all cursor positions to all users"""
+        if file_path in self.active_connections:
+            cursors = [
+                {"username": conn["username"], "position": conn.get("cursor_position", 0)}
+                for conn in self.active_connections[file_path]
+            ]
+            message = json.dumps({"type": "cursors_update", "cursors": cursors})
+            for connection in self.active_connections[file_path]:
+                try:
+                    await connection["websocket"].send_text(message)
+                except:
+                    pass
+
+    def update_cursor(self, websocket: WebSocket, file_path: str, position: int):
+        """Update cursor position for a specific connection"""
+        if file_path in self.active_connections:
+            for conn in self.active_connections[file_path]:
+                if conn["websocket"] == websocket:
+                    conn["cursor_position"] = position
+                    return True
+        return False
 
     async def broadcast_change(self, message: str, file_path: str, sender: WebSocket):
         if file_path in self.active_connections:
@@ -537,16 +565,25 @@ async def websocket_endpoint(websocket: WebSocket, file_path: str, token: str):
     try:
         while True:
             data = await websocket.receive_text()
-            # Broadcast the change to others
+            # Parse and handle different message types
             try:
-                # We expect data to be a JSON string
-                # Just forward it to everyone else
+                message = json.loads(data)
+                
+                # Handle cursor position updates
+                if message.get("type") == "cursor_update":
+                    position = message.get("position", 0)
+                    manager.update_cursor(websocket, file_path, position)
+                    await manager.broadcast_cursors(file_path)
+                else:
+                    # Broadcast other changes (content updates, etc.)
+                    await manager.broadcast_change(data, file_path, websocket)
+            except json.JSONDecodeError:
+                # If not JSON, just forward it (backward compatibility)
                 await manager.broadcast_change(data, file_path, websocket)
-            except:
-                pass
     except WebSocketDisconnect:
         manager.disconnect(websocket, file_path)
         await manager.broadcast_user_list(file_path)
+        await manager.broadcast_cursors(file_path)
 
 # --- Python Runner Endpoints ---
 from .python_runner import runner
