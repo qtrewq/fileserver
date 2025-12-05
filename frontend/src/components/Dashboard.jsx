@@ -477,7 +477,7 @@ export default function Dashboard() {
             setActiveUsers([]);
             setCursors([]);
         };
-    }, [showEditor, editorFilePath, user]);
+    }, [showEditor, editorFilePath, user?.username]);
 
     // Cleanup Python environment when editor closes
     useEffect(() => {

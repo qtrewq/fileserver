@@ -353,28 +353,21 @@ def list_or_get_file(path: str = "", db: Session = Depends(get_db), current_user
     safe_path = None
     try:
         safe_path = get_safe_path(current_user, path)
-    except HTTPException:
+    except:
         pass
-    except Exception as e:
-        print(f"Path resolution error: {e}")
-        # Don't raise yet, check shared
-    
-    # If not found or not accessible, check if it's a shared file
+
     if not safe_path or not os.path.exists(safe_path):
-        # Check if this exact path is shared with the user
         share = db.query(models.FolderShare).filter(
             models.FolderShare.shared_with_username == current_user.username,
             models.FolderShare.folder_path == path,
             models.FolderShare.is_file == True
         ).first()
-        
         if share:
-            # It's a shared file. Resolve path relative to owner.
             owner = crud.get_user(db, share.owner_username)
             if owner:
                 try:
                     safe_path = get_safe_path(owner, path)
-                except Exception:
+                except:
                     pass
 
     if not safe_path or not os.path.exists(safe_path):
@@ -650,20 +643,23 @@ async def websocket_endpoint(
     # Resolve canonical path
     canonical_path = None
     
-    # 1. Try resolving in user's root
+    # 1. Try resolving in user's root using safe path logic
     try:
-        canonical_path = get_safe_path(user, file_path)
+        candidate_path = get_safe_path(user, file_path)
+        if os.path.exists(candidate_path):
+            canonical_path = candidate_path
     except:
         pass
         
-    # 2. If not found/accessible, check shares
-    if not canonical_path or not os.path.exists(canonical_path):
+    # 2. If not found locally, check shares
+    if not canonical_path:
+        # Check direct file share
         share = db.query(models.FolderShare).filter(
             models.FolderShare.shared_with_username == username,
             models.FolderShare.folder_path == file_path,
             models.FolderShare.is_file == True
         ).first()
-        
+
         if share:
             owner = crud.get_user(db, share.owner_username)
             if owner:
@@ -671,14 +667,33 @@ async def websocket_endpoint(
                     canonical_path = get_safe_path(owner, file_path)
                 except:
                     pass
+        
+        # Check folder shares (recursive parent check)
+        if not canonical_path:
+            path_parts = file_path.split('/')
+            for i in range(len(path_parts), 0, -1):
+                check_path = "/".join(path_parts[:i])
+                share = db.query(models.FolderShare).filter(
+                    models.FolderShare.shared_with_username == username,
+                    models.FolderShare.folder_path == check_path,
+                    models.FolderShare.is_file == False
+                ).first()
+                if share:
+                    owner = crud.get_user(db, share.owner_username)
+                    if owner:
+                        try:
+                            # Verify the file actually exists in owner's space
+                            possible_path = get_safe_path(owner, file_path)
+                            if os.path.exists(possible_path):
+                                canonical_path = possible_path
+                        except:
+                            pass
+                    break
+
+    print(f"WS Connect: User={username} ReqPath={file_path} Canonical={canonical_path}")
 
     if not canonical_path:
-         # For new files that don't exist yet but are being created/edited? 
-         # Editors usually open existing files. If it's a new file unsaved, it might not have a path on server yet.
-         # But in this system, you generally open files that exist. 
-         # If you create a new file, it saves it. 
-         # However, if 'canonical_path' doesn't exist, we might fail.
-         # For collaboration, the file MUST exist on the server to be shared or accessed.
+         print(f"WS Connect Failed: Access Denied for {username} to {file_path}")
          await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
          return
 
