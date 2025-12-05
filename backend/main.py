@@ -624,7 +624,12 @@ def delete_group(group_name: str, db: Session = Depends(get_db), current_user: m
     return {"status": "deleted"}
 
 @app.websocket("/ws/{file_path:path}")
-async def websocket_endpoint(websocket: WebSocket, file_path: str, token: str):
+async def websocket_endpoint(
+    websocket: WebSocket, 
+    file_path: str, 
+    token: str,
+    db: Session = Depends(get_db)
+):
     # Validate token
     try:
         payload = auth.jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
@@ -632,11 +637,52 @@ async def websocket_endpoint(websocket: WebSocket, file_path: str, token: str):
         if username is None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
+            
+        # Get user for permission check
+        user = crud.get_user(db, username)
+        if not user:
+             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+             return
     except:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    await manager.connect(websocket, file_path, username)
+    # Resolve canonical path
+    canonical_path = None
+    
+    # 1. Try resolving in user's root
+    try:
+        canonical_path = get_safe_path(user, file_path)
+    except:
+        pass
+        
+    # 2. If not found/accessible, check shares
+    if not canonical_path or not os.path.exists(canonical_path):
+        share = db.query(models.FolderShare).filter(
+            models.FolderShare.shared_with_username == username,
+            models.FolderShare.folder_path == file_path,
+            models.FolderShare.is_file == True
+        ).first()
+        
+        if share:
+            owner = crud.get_user(db, share.owner_username)
+            if owner:
+                try:
+                    canonical_path = get_safe_path(owner, file_path)
+                except:
+                    pass
+
+    if not canonical_path:
+         # For new files that don't exist yet but are being created/edited? 
+         # Editors usually open existing files. If it's a new file unsaved, it might not have a path on server yet.
+         # But in this system, you generally open files that exist. 
+         # If you create a new file, it saves it. 
+         # However, if 'canonical_path' doesn't exist, we might fail.
+         # For collaboration, the file MUST exist on the server to be shared or accessed.
+         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+         return
+
+    await manager.connect(websocket, canonical_path, username)
     try:
         while True:
             data = await websocket.receive_text()
@@ -647,18 +693,18 @@ async def websocket_endpoint(websocket: WebSocket, file_path: str, token: str):
                 # Handle cursor position updates
                 if message.get("type") == "cursor_update":
                     position = message.get("position", 0)
-                    manager.update_cursor(websocket, file_path, position)
-                    await manager.broadcast_cursors(file_path)
+                    manager.update_cursor(websocket, canonical_path, position)
+                    await manager.broadcast_cursors(canonical_path)
                 else:
                     # Broadcast other changes (content updates, etc.)
-                    await manager.broadcast_change(data, file_path, websocket)
+                    await manager.broadcast_change(data, canonical_path, websocket)
             except json.JSONDecodeError:
                 # If not JSON, just forward it (backward compatibility)
-                await manager.broadcast_change(data, file_path, websocket)
+                await manager.broadcast_change(data, canonical_path, websocket)
     except WebSocketDisconnect:
-        manager.disconnect(websocket, file_path)
-        await manager.broadcast_user_list(file_path)
-        await manager.broadcast_cursors(file_path)
+        manager.disconnect(websocket, canonical_path)
+        await manager.broadcast_user_list(canonical_path)
+        await manager.broadcast_cursors(canonical_path)
 
 # --- Python Runner Endpoints ---
 from .python_runner import runner

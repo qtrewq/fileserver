@@ -40,7 +40,7 @@ export default function Dashboard() {
     const [editorFile, setEditorFile] = useState(null);
     const [editorFilePath, setEditorFilePath] = useState(''); // Full path to the file being edited
     const [editorSaving, setEditorSaving] = useState(false);
-    const [socket, setSocket] = useState(null);
+    const socketRef = useRef(null); // Use ref for socket
     const [activeUsers, setActiveUsers] = useState([]);
     const [pythonOutput, setPythonOutput] = useState('');
     const [pythonRunning, setPythonRunning] = useState(false);
@@ -426,18 +426,65 @@ export default function Dashboard() {
         return USER_COLORS[index];
     };
 
+    // Manage WebSocket connection
     useEffect(() => {
-        if (!showEditor && socket) {
-            socket.close();
-            setSocket(null);
+        if (!showEditor || !editorFilePath || !user) {
+            return;
+        }
+
+        const token = localStorage.getItem('token');
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/${editorFilePath}?token=${token}`;
+
+        const ws = new WebSocket(wsUrl);
+        socketRef.current = ws;
+
+        ws.onopen = () => {
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'users_update') {
+                    setActiveUsers(data.users);
+                } else if (data.type === 'cursor_update') {
+                    if (data.username !== user.username) { // Use user instead of currentUser
+                        setCursors(prev => {
+                            const otherCursors = prev.filter(c => c.username !== data.username);
+                            return [...otherCursors, {
+                                username: data.username,
+                                position: data.position,
+                                color: getUserColor(data.username)
+                            }];
+                        });
+                    }
+                } else if (data.type === 'content_update') {
+                    setEditorContent(prev => {
+                        if (data.content !== prev) {
+                            return data.content;
+                        }
+                        return prev;
+                    });
+                }
+            } catch (e) {
+                console.error('WS Parse error', e);
+            }
+        };
+
+        return () => {
+            ws.close();
+            socketRef.current = null;
             setActiveUsers([]);
             setCursors([]);
-        }
-        // Cleanup Python environment when editor closes
+        };
+    }, [showEditor, editorFilePath, user]);
+
+    // Cleanup Python environment when editor closes
+    useEffect(() => {
         if (!showEditor && pythonSessionId) {
             handleCleanupPython();
         }
-    }, [showEditor, socket, pythonSessionId]);
+    }, [showEditor, pythonSessionId]);
 
     // Filter cursors when active users change
     useEffect(() => {
@@ -445,10 +492,10 @@ export default function Dashboard() {
     }, [activeUsers]);
 
     const handleCursorChange = (position) => {
-        if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({
+        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            socketRef.current.send(JSON.stringify({
                 type: 'cursor_update',
-                username: currentUser.username,
+                username: user.username, // Use user instead of currentUser
                 position: position
             }));
         }
@@ -466,52 +513,8 @@ export default function Dashboard() {
             const response = await api.get(`/files/${path}?_=${Date.now()}`, { responseType: 'text' });
             setEditorContent(response.data);
             setEditorFile(item);
-            setEditorFilePath(path); // Store the full path
+            setEditorFilePath(path);
             setShowEditor(true);
-
-            // Connect to WebSocket
-            const token = localStorage.getItem('token');
-            // Construct WS URL based on current location
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/${path}?token=${token}`;
-
-            const newSocket = new WebSocket(wsUrl);
-
-            newSocket.onopen = () => {
-                console.log('Connected to collaboration room');
-            };
-
-            newSocket.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'users_update') {
-                        setActiveUsers(data.users);
-                    } else if (data.type === 'cursor_update') {
-                        if (data.username !== currentUser.username) {
-                            setCursors(prev => {
-                                const otherCursors = prev.filter(c => c.username !== data.username);
-                                return [...otherCursors, {
-                                    username: data.username,
-                                    position: data.position,
-                                    color: getUserColor(data.username)
-                                }];
-                            });
-                        }
-                    } else if (data.type === 'content_update') {
-                        if (data.content !== editorContent) {
-                            setEditorContent(data.content);
-                        }
-                    }
-                } catch (e) {
-                    // Legacy support for raw text updates
-                    if (event.data !== editorContent) {
-                        setEditorContent(event.data);
-                    }
-                }
-            };
-
-            setSocket(newSocket);
-
         } catch (err) {
             alert('Failed to load file for editing');
             console.error(err);
@@ -1784,6 +1787,10 @@ export default function Dashboard() {
                                         setShowEditor(false);
                                         setEditorContent('');
                                         setEditorFile(null);
+                                        if (socketRef.current) {
+                                            socketRef.current.close();
+                                            socketRef.current = null;
+                                        }
                                     }}
                                     className="p-2 hover:bg-slate-800 rounded text-slate-400"
                                 >
@@ -1799,8 +1806,8 @@ export default function Dashboard() {
                                 onChange={(e) => {
                                     const newContent = e.target.value;
                                     setEditorContent(newContent);
-                                    if (socket && socket.readyState === WebSocket.OPEN) {
-                                        socket.send(JSON.stringify({
+                                    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                                        socketRef.current.send(JSON.stringify({
                                             type: 'content_update',
                                             content: newContent
                                         }));
