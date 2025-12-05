@@ -461,7 +461,7 @@ export default function Dashboard() {
         }
 
         try {
-            const path = currentPath ? `${currentPath}/${item.name}` : item.name;
+            const path = item.shared ? item.path : (currentPath ? `${currentPath}/${item.name}` : item.name);
             // Add cache busting to prevent loading stale content
             const response = await api.get(`/files/${path}?_=${Date.now()}`, { responseType: 'text' });
             setEditorContent(response.data);

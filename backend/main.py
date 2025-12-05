@@ -349,14 +349,36 @@ def change_password(
 
 # --- File Endpoints ---
 @app.get("/api/files/{path:path}")
-def list_or_get_file(path: str = "", current_user: models.User = Depends(get_current_user)):
+def list_or_get_file(path: str = "", db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    safe_path = None
     try:
         safe_path = get_safe_path(current_user, path)
-    except HTTPException as e:
-        raise e
+    except HTTPException:
+        pass
     except Exception as e:
         print(f"Path resolution error: {e}")
-        raise HTTPException(status_code=400, detail=f"[ERR_PATH_RES] Invalid path: {str(e)}")
+        # Don't raise yet, check shared
+    
+    # If not found or not accessible, check if it's a shared file
+    if not safe_path or not os.path.exists(safe_path):
+        # Check if this exact path is shared with the user
+        share = db.query(models.FolderShare).filter(
+            models.FolderShare.shared_with_username == current_user.username,
+            models.FolderShare.folder_path == path,
+            models.FolderShare.is_file == True
+        ).first()
+        
+        if share:
+            # It's a shared file. Resolve path relative to owner.
+            owner = crud.get_user(db, share.owner_username)
+            if owner:
+                try:
+                    safe_path = get_safe_path(owner, path)
+                except Exception:
+                    pass
+
+    if not safe_path or not os.path.exists(safe_path):
+         raise HTTPException(status_code=404, detail="[ERR_NOT_FOUND] File or directory not found")
     
     if os.path.isdir(safe_path):
         try:
@@ -524,7 +546,11 @@ def share_folder(
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    crud.create_folder_share(db, share.folder_path, current_user.username, share.username, share.permission)
+    # Check if it's a file
+    safe_path = get_safe_path(current_user, share.folder_path)
+    is_file = os.path.isfile(safe_path)
+    
+    crud.create_folder_share(db, share.folder_path, current_user.username, share.username, share.permission, is_file=is_file)
     return {"status": "shared"}
 
 @app.get("/api/shared-with-me", response_model=List[schemas.FolderShareInfo])
