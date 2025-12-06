@@ -37,9 +37,37 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked; OnlyBelowVersion: 6.1; Check: not IsAdminInstallMode
 
 [Files]
+; Main executable
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+
+; Documentation
+Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README_EXECUTABLE.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "RELEASE_NOTES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "INSTALLER_GUIDE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "INSTALLATION_OPTIONS.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "INSTALLER_CONTENTS.md"; DestDir: "{app}"; Flags: ignoreversion
+
+; Python source files
+Source: "launcher.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "fileserver.spec"; DestDir: "{app}"; Flags: ignoreversion
+
+; Build scripts
+Source: "build.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "build_installer.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "run.bat"; DestDir: "{app}"; Flags: ignoreversion
+
+; Backend directory (all Python files)
+Source: "backend\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; Frontend directory (source and built files)
+Source: "frontend\*"; DestDir: "{app}\frontend"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "node_modules,*.log"
+
+; Git files
+Source: ".gitignore"; DestDir: "{app}"; Flags: ignoreversion
+
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]
