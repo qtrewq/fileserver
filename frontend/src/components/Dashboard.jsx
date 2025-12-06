@@ -532,7 +532,7 @@ export default function Dashboard() {
         }
     };
 
-    const handleSaveFile = async () => {
+    const saveFileInternal = async (silent = false) => {
         if (!editorFile) return;
 
         setEditorSaving(true);
@@ -547,19 +547,37 @@ export default function Dashboard() {
             formData.append('files', blob, fileName);
 
             await api.post(`/upload/${directory}`, formData);
-            setShowEditor(false);
-            setEditorContent('');
-            setEditorFile(null);
-            setEditorFilePath('');
-            fetchItems();
-            alert('File saved successfully');
+
+            if (!silent) {
+                setShowEditor(false);
+                setEditorContent('');
+                setEditorFile(null);
+                setEditorFilePath('');
+                fetchItems();
+                alert('File saved successfully');
+            }
         } catch (err) {
             console.error('Save error:', err);
-            alert(`Failed to save file: ${err.response?.data?.detail || err.message}`);
+            if (!silent) {
+                alert(`Failed to save file: ${err.response?.data?.detail || err.message}`);
+            }
         } finally {
             setEditorSaving(false);
         }
     };
+
+    const handleSaveFile = () => saveFileInternal(false);
+
+    // Autosave Effect
+    useEffect(() => {
+        if (!showEditor || !editorFile) return;
+
+        const timer = setTimeout(() => {
+            saveFileInternal(true);
+        }, 1000); // Autosave after 1 second of inactivity
+
+        return () => clearTimeout(timer);
+    }, [editorContent, showEditor, editorFile]);
 
     const handleRunPython = async () => {
         if (!editorFile || !editorFile.name.endsWith('.py')) return;
@@ -1817,15 +1835,11 @@ export default function Dashboard() {
                                 onChange={(e) => {
                                     const newContent = e.target.value;
                                     setEditorContent(newContent);
-                                    console.log('Editor Change:', newContent.length, 'Socket:', socketRef.current ? socketRef.current.readyState : 'null');
                                     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-                                        console.log('Sending WS update:', newContent.substring(0, 20));
                                         socketRef.current.send(JSON.stringify({
                                             type: 'content_update',
                                             content: newContent
                                         }));
-                                    } else {
-                                        console.warn("WS Send Skipped:", "State=" + (socketRef.current ? socketRef.current.readyState : "Null"));
                                     }
                                 }}
                                 language={getFileLanguage(editorFile?.name || '')}

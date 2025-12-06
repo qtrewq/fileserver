@@ -468,6 +468,31 @@ async def upload_files(
                 with open(full_file_path, "wb") as f:
                     f.write(file_content)
                 uploaded_files.append(file_relative_path)
+
+                # Broadcast update to WebSocket clients
+                try:
+                    # Attempt to decode as text
+                    text_content = file_content.decode('utf-8')
+                    
+                    # Normalize path for broadcasting (must match websocket_endpoint logic)
+                    broadcast_path = os.path.abspath(full_file_path)
+                    if os.name == 'nt':
+                        broadcast_path = broadcast_path.lower()
+                    
+                    # Construct message
+                    msg = json.dumps({
+                        "type": "content_update",
+                        "content": text_content
+                    })
+                    
+                    # Broadcast (sender=None means send to all)
+                    await manager.broadcast_change(msg, broadcast_path, None)
+                    print(f"Saved and broadcasted update for: {broadcast_path}")
+                    
+                except UnicodeDecodeError:
+                    pass # Not a text file, skip broadcast
+                except Exception as e:
+                    print(f"Error broadcasting update: {e}")
             except OSError as e:
                 raise HTTPException(status_code=500, detail=f"[ERR_FILE_WRITE] Failed to write file {file.filename}: {str(e)}")
         
