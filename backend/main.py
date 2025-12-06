@@ -503,6 +503,73 @@ async def upload_files(
         print(f"Upload error: {e}")
         raise HTTPException(status_code=500, detail=f"[ERR_UPLOAD_GENERIC] Upload failed: {str(e)}")
 
+@app.post("/api/save-file")
+async def save_file(
+    file_path: str = Form(...),
+    content: str = Form(...),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Save file content - used by editor autosave. Checks file access permission."""
+    try:
+        # Try to resolve path in user's root
+        safe_path = None
+        try:
+            safe_path = get_safe_path(current_user, file_path)
+        except:
+            pass
+        
+        # If not in user's root, check if it's a shared file
+        if not safe_path or not os.path.exists(safe_path):
+            share = db.query(models.FolderShare).filter(
+                models.FolderShare.shared_with_username == current_user.username,
+                models.FolderShare.folder_path == file_path,
+                models.FolderShare.is_file == True
+            ).first()
+            
+            if share:
+                owner = crud.get_user(db, share.owner_username)
+                if owner:
+                    try:
+                        safe_path = get_safe_path(owner, file_path)
+                    except:
+                        pass
+        
+        if not safe_path:
+            raise HTTPException(status_code=404, detail="File not found or access denied")
+        
+        # Write content
+        with open(safe_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        
+        # Broadcast update to WebSocket clients
+        try:
+            # Normalize path for broadcasting
+            broadcast_path = os.path.abspath(safe_path)
+            if os.name == 'nt':
+                broadcast_path = broadcast_path.lower()
+            
+            # Construct message
+            msg = json.dumps({
+                "type": "content_update",
+                "content": content
+            })
+            
+            # Broadcast (sender=None means send to all)
+            await manager.broadcast_change(msg, broadcast_path, None)
+            print(f"Saved and broadcasted update for: {broadcast_path}")
+        except Exception as e:
+            print(f"Error broadcasting update: {e}")
+        
+        return {"status": "saved"}
+        
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(f"Save error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+
 @app.post("/api/mkdir/{path:path}")
 def create_directory(path: str, current_user: models.User = Depends(get_current_user)):
     auth.check_permission(current_user, 'can_create_folders')

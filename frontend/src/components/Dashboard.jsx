@@ -537,16 +537,12 @@ export default function Dashboard() {
 
         setEditorSaving(true);
         try {
-            // Use the stored file path to save to the correct location
-            const pathParts = editorFilePath.split('/');
-            const fileName = pathParts.pop(); // Get filename
-            const directory = pathParts.join('/'); // Get directory path
-
-            const blob = new Blob([editorContent], { type: 'text/plain' });
+            // Use new save-file endpoint
             const formData = new FormData();
-            formData.append('files', blob, fileName);
+            formData.append('file_path', editorFilePath);
+            formData.append('content', editorContent);
 
-            await api.post(`/upload/${directory}`, formData);
+            await api.post('/save-file', formData);
 
             if (!silent) {
                 setShowEditor(false);
