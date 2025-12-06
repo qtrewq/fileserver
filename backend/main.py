@@ -146,10 +146,16 @@ def is_admin(user: models.User) -> bool:
     return bool(admin_groups & user_group_names)
 
 def is_super_admin(user: models.User) -> bool:
-    """Check if user is a super admin based on group membership."""
-    if not user or not user.groups:
+    """Check if user is a super admin based on database flag or group membership."""
+    if not user:
         return False
-    return any(g.name == 'super_admins' for g in user.groups)
+    # Check database flag first
+    if user.is_super_admin:
+        return True
+    # Also check group membership for backward compatibility
+    if user.groups:
+        return any(g.name == 'super_admins' for g in user.groups)
+    return False
 
 
 def get_safe_path(user: models.User, path: str = ""):
