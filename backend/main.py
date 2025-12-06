@@ -969,8 +969,11 @@ def startup_event():
             password="adminpassword",
             root_path="/",
             is_admin=True,
-            is_super_admin=True
+            is_super_admin=True,
+            require_password_change=True  # Force password change on first login
         ))
+        print("Created default admin user (username: admin, password: adminpassword)")
+        print("IMPORTANT: You must change the admin password on first login!")
     db.close()
 
 # Serve static files
