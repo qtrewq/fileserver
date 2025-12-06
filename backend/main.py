@@ -80,6 +80,9 @@ class ConnectionManager:
                         await connection["websocket"].send_text(message)
                     except:
                         pass
+            print(f"WS Broadcast: Path={file_path} Recipients={len(self.active_connections[file_path])-1} MessageLen={len(message)}")
+        else:
+            print(f"WS Broadcast Error: Path={file_path} not in active connections. Active: {list(self.active_connections.keys())}")
 
 manager = ConnectionManager()
 
@@ -696,6 +699,10 @@ async def websocket_endpoint(
          print(f"WS Connect Failed: Access Denied for {username} to {file_path}")
          await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
          return
+
+    # Normalize path case for Windows to ensure consistent room keys
+    if os.name == 'nt':
+        canonical_path = canonical_path.lower()
 
     await manager.connect(websocket, canonical_path, username)
     try:

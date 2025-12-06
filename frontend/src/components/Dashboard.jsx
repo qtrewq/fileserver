@@ -436,10 +436,12 @@ export default function Dashboard() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/${editorFilePath}?token=${token}`;
 
+        console.log('Connecting WS to', wsUrl);
         const ws = new WebSocket(wsUrl);
         socketRef.current = ws;
 
         ws.onopen = () => {
+            console.log('Connected to collaboration room');
         };
 
         ws.onmessage = (event) => {
@@ -459,6 +461,7 @@ export default function Dashboard() {
                         });
                     }
                 } else if (data.type === 'content_update') {
+                    console.log('WS Received content:', data.content);
                     setEditorContent(prev => {
                         if (data.content !== prev) {
                             return data.content;
@@ -471,13 +474,21 @@ export default function Dashboard() {
             }
         };
 
+        ws.onclose = (e) => {
+            console.log('WS Closed:', e.code, e.reason);
+        };
+
+        ws.onerror = (e) => {
+            console.error('WS Error:', e);
+        };
+
         return () => {
             ws.close();
             socketRef.current = null;
             setActiveUsers([]);
             setCursors([]);
         };
-    }, [showEditor, editorFilePath, user?.username]);
+    }, [showEditor, editorFilePath]);
 
     // Cleanup Python environment when editor closes
     useEffect(() => {
@@ -1806,11 +1817,15 @@ export default function Dashboard() {
                                 onChange={(e) => {
                                     const newContent = e.target.value;
                                     setEditorContent(newContent);
+                                    console.log('Editor Change:', newContent.length, 'Socket:', socketRef.current ? socketRef.current.readyState : 'null');
                                     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                                        console.log('Sending WS update:', newContent.substring(0, 20));
                                         socketRef.current.send(JSON.stringify({
                                             type: 'content_update',
                                             content: newContent
                                         }));
+                                    } else {
+                                        console.warn("WS Send Skipped:", "State=" + (socketRef.current ? socketRef.current.readyState : "Null"));
                                     }
                                 }}
                                 language={getFileLanguage(editorFile?.name || '')}
