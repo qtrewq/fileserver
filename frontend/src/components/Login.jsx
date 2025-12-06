@@ -152,13 +152,6 @@ export default function Login() {
                             )}
                         </button>
                     </form>
-
-                    {/* Footer */}
-                    <div className="mt-8 pt-6 border-t border-white/5 text-center">
-                        <p className="text-xs text-slate-500">
-                            Default credentials: <span className="text-slate-400 font-mono">admin / adminpassword</span>
-                        </p>
-                    </div>
                 </div>
 
                 {/* Bottom decorative text */}
