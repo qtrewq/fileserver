@@ -343,16 +343,21 @@ def admin_reset_password(
     crud.update_password(db, username, request.new_password)
     return {"status": "password reset"}
 
-@app.put("/api/users/change-password")
+@app.post("/api/change-password")
 def change_password(
-    currentPassword: str = Form(...),
-    newPassword: str = Form(...),
+    password_data: schemas.PasswordChange,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    if not crud.authenticate_user(db, current_user.username, currentPassword):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-    crud.update_password(db, current_user.username, newPassword)
+    # If user has require_password_change flag, allow password change without current password
+    if not current_user.require_password_change:
+        # Normal password change - verify current password
+        if not password_data.current_password:
+            raise HTTPException(status_code=400, detail="Current password is required")
+        if not crud.authenticate_user(db, current_user.username, password_data.current_password):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+    
+    crud.update_password(db, current_user.username, password_data.new_password)
     return {"status": "password changed"}
 
 
