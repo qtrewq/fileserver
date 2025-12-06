@@ -973,18 +973,43 @@ async def websocket_endpoint(websocket: WebSocket, file_path: str, token: str = 
 @app.on_event("startup")
 def startup_event():
     db = database.SessionLocal()
+    
+    # Create super_admins group if it doesn't exist
+    super_admin_group = crud.get_group(db, "super_admins")
+    if not super_admin_group:
+        super_admin_group = crud.create_group(db, schemas.GroupCreate(
+            name="super_admins",
+            description="Super Administrators with full system access",
+            default_permission="admin",
+            can_upload=True,
+            can_download=True,
+            can_delete=True,
+            can_share=True,
+            can_create_folders=True
+        ))
+        print("Created super_admins group")
+    
+    # Create admin user if it doesn't exist
     user = crud.get_user(db, "admin")
     if not user:
-        crud.create_user(db, schemas.UserCreate(
+        user = crud.create_user(db, schemas.UserCreate(
             username="admin",
             password="adminpassword",
             root_path="/",
             is_admin=True,
             is_super_admin=True,
-            require_password_change=True  # Force password change on first login
+            require_password_change=True,  # Force password change on first login
+            groups=["super_admins"]  # Add to super_admins group
         ))
         print("Created default admin user (username: admin, password: adminpassword)")
         print("IMPORTANT: You must change the admin password on first login!")
+    else:
+        # Ensure existing admin user is in super_admins group
+        if super_admin_group not in user.groups:
+            user.groups.append(super_admin_group)
+            db.commit()
+            print("Added admin user to super_admins group")
+    
     db.close()
 
 # Serve static files
