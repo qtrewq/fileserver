@@ -40,12 +40,28 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescrip
 ; Main executable
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
-; All Documentation Files
-Source: "*.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "*.txt"; DestDir: "{app}"; Flags: ignoreversion; Excludes: "LICENSE"
+; Documentation Files
+Source: "AUTHORIZATION_FIX.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "CREATE_RELEASE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "DOCKER_GUIDE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "EXECUTABLE_FIXED.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "FINAL_ADMIN_FIX.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "INSTALLATION_OPTIONS.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "INSTALLER_CONTENTS.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "INSTALLER_GUIDE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "LINUX_GUIDE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "LINUX_PORT_SUMMARY.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "PASSWORD_CHANGE_FIX.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "README_EXECUTABLE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "RELEASE_NOTES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "RELEASE_SUMMARY.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "SECURITY_AUDIT.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "SECURITY_PASSWORD_CHANGE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "STORAGE_ACCESS_FIX.md"; DestDir: "{app}"; Flags: ignoreversion
 
 ; License files
-Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion; DestName: "LICENSE"
+Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Python source files
@@ -59,28 +75,30 @@ Source: "fileserver.spec"; DestDir: "{app}"; Flags: ignoreversion
 Source: "fileserver-linux.spec"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Windows batch scripts
-Source: "*.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "build.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "build_installer.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "run.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "start-server.bat"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Linux shell scripts
-Source: "*.sh"; DestDir: "{app}"; Flags: ignoreversion
+Source: "build-linux.sh"; DestDir: "{app}"; Flags: ignoreversion
+Source: "install-linux.sh"; DestDir: "{app}"; Flags: ignoreversion
+Source: "run-linux.sh"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Docker files
-Source: "Dockerfile"; DestDir: "{app}"; Flags: ignoreversion skipifnotexist
-Source: "docker-compose.yml"; DestDir: "{app}"; Flags: ignoreversion skipifnotexist
-Source: ".dockerignore"; DestDir: "{app}"; Flags: ignoreversion skipifnotexist; Attribs: hidden
+Source: "Dockerfile"; DestDir: "{app}"; Flags: ignoreversion
+Source: "docker-compose.yml"; DestDir: "{app}"; Flags: ignoreversion
+Source: ".dockerignore"; DestDir: "{app}"; Flags: ignoreversion; Attribs: hidden
 
-; Git files
-Source: ".gitignore"; DestDir: "{app}"; Flags: ignoreversion skipifnotexist; Attribs: hidden
-Source: ".env.example"; DestDir: "{app}"; Flags: ignoreversion skipifnotexist; Attribs: hidden
+; Configuration files
+Source: ".gitignore"; DestDir: "{app}"; Flags: ignoreversion; Attribs: hidden
+Source: ".env.example"; DestDir: "{app}"; Flags: ignoreversion; Attribs: hidden
 
 ; Backend directory (all Python files and subdirectories)
 Source: "backend\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Frontend directory (source and built files, excluding node_modules)
 Source: "frontend\*"; DestDir: "{app}\frontend"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "node_modules,*.log,package-lock.json"
-
-; NOTE: Explicitly exclude storage folder and database
-; Excludes: storage\*,*.db,*.sqlite,*.sqlite3
 
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
