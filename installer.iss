@@ -65,13 +65,13 @@ Source: "*.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "*.sh"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Docker files
-Source: "Dockerfile"; DestDir: "{app}"; Flags: ignoreversion
-Source: "docker-compose.yml"; DestDir: "{app}"; Flags: ignoreversion
-Source: ".dockerignore"; DestDir: "{app}"; Flags: ignoreversion; Attribs: hidden
+Source: "Dockerfile"; DestDir: "{app}"; Flags: ignoreversion skipifnotexist
+Source: "docker-compose.yml"; DestDir: "{app}"; Flags: ignoreversion skipifnotexist
+Source: ".dockerignore"; DestDir: "{app}"; Flags: ignoreversion skipifnotexist; Attribs: hidden
 
 ; Git files
-Source: ".gitignore"; DestDir: "{app}"; Flags: ignoreversion; Attribs: hidden
-Source: ".env.example"; DestDir: "{app}"; Flags: ignoreversion; Attribs: hidden
+Source: ".gitignore"; DestDir: "{app}"; Flags: ignoreversion skipifnotexist; Attribs: hidden
+Source: ".env.example"; DestDir: "{app}"; Flags: ignoreversion skipifnotexist; Attribs: hidden
 
 ; Backend directory (all Python files and subdirectories)
 Source: "backend\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs
