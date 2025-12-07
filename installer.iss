@@ -58,6 +58,11 @@ Source: "fileserver.spec"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build_installer.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "run.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "start-server.bat"; DestDir: "{app}"; Flags: ignoreversion
+
+; Diagnostic tools
+Source: "diagnose_storage.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "STORAGE_ACCESS_FIX.md"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Backend directory (all Python files)
 Source: "backend\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs
