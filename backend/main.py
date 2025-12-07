@@ -161,14 +161,26 @@ def is_super_admin(user: models.User) -> bool:
 def get_safe_path(user: models.User, path: str = ""):
     storage_root = os.path.abspath(os.getenv("STORAGE_ROOT", "./storage"))
     
+    # Debug output
+    print(f"[DEBUG] get_safe_path called:")
+    print(f"  User: {user.username}")
+    print(f"  User root_path: {user.root_path}")
+    print(f"  Requested path: {path}")
+    print(f"  STORAGE_ROOT env: {os.getenv('STORAGE_ROOT', 'NOT SET')}")
+    print(f"  Resolved storage_root: {storage_root}")
+    
     # Handle root path correctly
     user_root_path = user.root_path.strip("/")
     user_root = os.path.join(storage_root, user_root_path)
+    
+    print(f"  User root directory: {user_root}")
+    print(f"  User root exists: {os.path.exists(user_root)}")
     
     # Ensure user root exists
     if not os.path.exists(user_root):
         try:
             os.makedirs(user_root, exist_ok=True)
+            print(f"  Created user root: {user_root}")
         except OSError as e:
             print(f"Error creating user root: {e}")
             raise HTTPException(status_code=500, detail="[ERR_FS_CREATE] Could not create user storage directory")
@@ -178,6 +190,15 @@ def get_safe_path(user: models.User, path: str = ""):
 
     # Construct full path
     full_path = os.path.abspath(os.path.join(user_root, path.strip("/")))
+    
+    print(f"  Final full_path: {full_path}")
+    print(f"  Full path exists: {os.path.exists(full_path)}")
+    if os.path.exists(full_path) and os.path.isdir(full_path):
+        try:
+            contents = os.listdir(full_path)
+            print(f"  Directory contents ({len(contents)} items): {contents[:5]}")
+        except:
+            print(f"  Could not list directory contents")
     
     # Security check: Ensure path is within user_root
     if not full_path.startswith(user_root):
