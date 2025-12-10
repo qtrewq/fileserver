@@ -16,6 +16,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/account-disabled" element={<AccountDisabled />} />
+        <Route path="/reset-password" element={<Login />} />
         <Route
           path="/*"
           element={

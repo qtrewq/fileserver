@@ -46,6 +46,7 @@ class Group(GroupBase):
 
 class UserBase(BaseModel):
     username: str
+    email: Optional[str] = None
     root_path: Optional[str] = "/"
     is_admin: Optional[bool] = False
     is_super_admin: Optional[bool] = False
@@ -103,6 +104,7 @@ class PasswordChange(BaseModel):
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
+    email: Optional[str] = None
     root_path: Optional[str] = None
     is_admin: Optional[bool] = None
     is_super_admin: Optional[bool] = None

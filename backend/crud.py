@@ -17,7 +17,8 @@ def count_enabled_super_admins(db: Session) -> int:
 def create_user(db: Session, user: schemas.UserCreate):
     hashed_password = auth.get_password_hash(user.password)
     db_user = models.User(
-        username=user.username, 
+        username=user.username,
+        email=user.email,
         hashed_password=hashed_password,
         root_path=user.root_path,
         is_admin=user.is_admin,
@@ -54,6 +55,8 @@ def update_user(db: Session, username: str, user_update: schemas.UserUpdate):
     
     if user_update.username is not None:
         user.username = user_update.username
+    if user_update.email is not None:
+        user.email = user_update.email
     if user_update.root_path is not None:
         user.root_path = user_update.root_path
     if user_update.is_admin is not None:
@@ -177,7 +180,12 @@ def update_user_groups(db: Session, user: models.User, group_names: list[str]):
     db.refresh(user)
 
 def authenticate_user(db: Session, username: str, password: str):
+    # Try fetching by username
     user = get_user(db, username)
+    # If not found, try fetching by email
+    if not user:
+        user = db.query(models.User).filter(models.User.email == username).first()
+        
     if not user:
         return False
     if not auth.verify_password(password, user.hashed_password):

@@ -2,7 +2,7 @@
 ; Download Inno Setup from: https://jrsoftware.org/isdl.php
 
 #define MyAppName "FileServer"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "FileServer Team"
 #define MyAppURL "https://github.com/qtrewq/fileserver"
 #define MyAppExeName "FileServer.exe"
@@ -41,24 +41,8 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescrip
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Documentation Files
-Source: "AUTHORIZATION_FIX.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "CREATE_RELEASE.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "DOCKER_GUIDE.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "EXECUTABLE_FIXED.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "FINAL_ADMIN_FIX.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "INSTALLATION_OPTIONS.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "INSTALLER_CONTENTS.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "INSTALLER_GUIDE.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "LINUX_GUIDE.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "LINUX_PORT_SUMMARY.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "PASSWORD_CHANGE_FIX.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "README_EXECUTABLE.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "RELEASE_NOTES.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "RELEASE_SUMMARY.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "SECURITY_AUDIT.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "SECURITY_PASSWORD_CHANGE.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "STORAGE_ACCESS_FIX.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "EMAIL_SETUP.md"; DestDir: "{app}"; Flags: ignoreversion
 
 ; License files
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
@@ -67,8 +51,9 @@ Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 ; Python source files
 Source: "launcher.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
-Source: "diagnose_storage.py"; DestDir: "{app}"; Flags: ignoreversion
-Source: "test_file_save.py"; DestDir: "{app}"; Flags: ignoreversion
+
+; NOTE: Exclude user database - users will create their own
+; Source: "fileserver.db"; DestDir: "{app}"; Flags: ignoreversion
 
 ; PyInstaller spec files
 Source: "fileserver.spec"; DestDir: "{app}"; Flags: ignoreversion
@@ -94,11 +79,14 @@ Source: ".dockerignore"; DestDir: "{app}"; Flags: ignoreversion; Attribs: hidden
 Source: ".gitignore"; DestDir: "{app}"; Flags: ignoreversion; Attribs: hidden
 Source: ".env.example"; DestDir: "{app}"; Flags: ignoreversion; Attribs: hidden
 
-; Backend directory (all Python files and subdirectories)
-Source: "backend\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Backend directory (all Python files, excluding __pycache__)
+Source: "backend\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__,*.pyc,*.pyo"
 
-; Frontend directory (source and built files, excluding node_modules)
-Source: "frontend\*"; DestDir: "{app}\frontend"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "node_modules,*.log,package-lock.json"
+; Frontend directory (source and built files, excluding node_modules and build artifacts)
+Source: "frontend\*"; DestDir: "{app}\frontend"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "node_modules,*.log,package-lock.json,__pycache__,*.pyc"
+
+; Create empty storage directory structure (but don't include user files)
+; The storage directory will be created by the installer but will be empty
 
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 

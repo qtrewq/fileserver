@@ -115,6 +115,16 @@ Users can be assigned to groups with different permission levels:
 - ✅ File type restrictions
 - ✅ Permission-based access control
 
+## Email Configuration
+
+The server supports sending password reset emails.
+See [EMAIL_SETUP.md](EMAIL_SETUP.md) for detailed configuration instructions.
+
+Supported Modes:
+- **Gmail (Recommended)**: Use your Gmail account with an App Password.
+- **Relay**: Use a custom SMTP provider (Brevo, Mailgun).
+- **Direct**: Send directly (blocked by most residential ISPs).
+
 ## Real-time Collaboration
 
 The application supports real-time collaboration features:

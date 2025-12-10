@@ -1,0 +1,37 @@
+{
+  "server": {
+    "port": 30815,
+    "host": "0.0.0.0",
+    "public_url": "file.aqueous.lol",
+    "reload": true
+  },
+  "security": {
+    "max_file_size_mb": 100,
+    "max_total_upload_size_mb": 500,
+    "allowed_origins": "*",
+    "session_timeout_minutes": 480
+  },
+  "storage": {
+    "root_path": "./storage"
+  },
+  "features": {
+    "enable_file_sharing": true,
+    "enable_collaborative_editing": true,
+    "enable_python_execution": true
+  },
+  "limits": {
+    "max_users": 1000,
+    "max_groups": 100,
+    "max_concurrent_connections": 100
+  },
+  "smtp": {
+    "enabled": true,
+    "mode": "gmail",
+    "host": "smtp.aqueous.lol",
+    "port": 587,
+    "username": "jhmgallagher2009@gmail.com",
+    "password": "yeau bibw ybur cafo ",
+    "from_email": "noreply@aqueous.lol",
+    "use_tls": true
+  }
+}

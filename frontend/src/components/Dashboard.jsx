@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import api from '../api';
 import CodeEditor from './CodeEditor';
+import AccountSettings from './AccountSettings';
 import {
     Folder, File, FileText, Image as ImageIcon, Music, Video,
     Download, Trash2, Upload, Home, LogOut, Settings, ChevronRight,
     RefreshCw, X, FolderPlus, Share2, Users, Check, Key, Menu, Grid3x3, List, LayoutGrid, Edit, Save, Play, Terminal, FolderUp,
-    ArrowUpDown, ArrowUp, ArrowDown
+    ArrowUpDown, ArrowUp, ArrowDown, User
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -48,6 +49,10 @@ export default function Dashboard() {
     const [pythonSessionId, setPythonSessionId] = useState(null);
     const [sortBy, setSortBy] = useState(localStorage.getItem('sortBy') || 'name'); // 'name', 'size', 'date', 'type'
     const [sortOrder, setSortOrder] = useState(localStorage.getItem('sortOrder') || 'asc'); // 'asc' or 'desc'
+    const [showAccountSettings, setShowAccountSettings] = useState(false);
+    const [showEmailModal, setShowEmailModal] = useState(false);
+    const [recoveryEmail, setRecoveryEmail] = useState('');
+    const [recoveryPassword, setRecoveryPassword] = useState('');
 
     const currentPath = location.pathname.substring(1);
 
@@ -77,8 +82,12 @@ export default function Dashboard() {
 
     // Check if user needs to change password
     useEffect(() => {
-        if (user && user.require_password_change) {
-            setShowPasswordModal(true);
+        if (user) {
+            if (user.require_password_change) {
+                setShowPasswordModal(true);
+            } else if (user.is_super_admin && !user.email) {
+                setShowEmailModal(true);
+            }
         }
     }, [user]);
 
@@ -1245,11 +1254,11 @@ export default function Dashboard() {
                         </div>
 
                         <button
-                            onClick={() => setShowPasswordModal(true)}
-                            className="p-2 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-yellow-400"
-                            title="Change Password"
+                            onClick={() => setShowAccountSettings(true)}
+                            className="p-2 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-white"
+                            title="Account Settings"
                         >
-                            <Key className="w-5 h-5" />
+                            <User className="w-5 h-5" />
                         </button>
                         {user?.is_admin && (
                             <Link to="/admin" className="btn-secondary flex items-center space-x-2 !px-3">
@@ -1862,6 +1871,75 @@ export default function Dashboard() {
                                 <pre className="text-sm text-slate-300 font-mono whitespace-pre-wrap">{pythonOutput}</pre>
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* Account Settings Modal */}
+            {showAccountSettings && (
+                <AccountSettings onClose={() => setShowAccountSettings(false)} />
+            )}
+
+            {/* Recovery Email Setup Modal */}
+            {showEmailModal && (
+                <div className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4">
+                    <div className="glass-card w-full max-w-md p-6 animate-scale-in">
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center text-blue-400">
+                                <Mail className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-bold text-white">Setup Recovery Email</h3>
+                                <p className="text-sm text-slate-400">Required for account security</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-slate-300">Recovery Email</label>
+                                <input
+                                    type="email"
+                                    value={recoveryEmail}
+                                    onChange={(e) => setRecoveryEmail(e.target.value)}
+                                    className="input-field"
+                                    placeholder="Enter your email address"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-slate-300">Current Password</label>
+                                <input
+                                    type="password"
+                                    value={recoveryPassword}
+                                    onChange={(e) => setRecoveryPassword(e.target.value)}
+                                    className="input-field"
+                                    placeholder="Confirm password to save"
+                                />
+                            </div>
+
+                            <button
+                                onClick={async () => {
+                                    if (!recoveryEmail || !recoveryPassword) {
+                                        alert('Please fill in all fields');
+                                        return;
+                                    }
+                                    try {
+                                        const formData = new FormData();
+                                        formData.append('new_email', recoveryEmail);
+                                        formData.append('current_password', recoveryPassword);
+
+                                        await api.put('/account/settings', formData);
+                                        setShowEmailModal(false);
+                                        alert('Recovery email saved successfully');
+                                        fetchUser(); // Refresh user to clear check
+                                    } catch (err) {
+                                        alert(err.response?.data?.detail || 'Failed to save email');
+                                    }
+                                }}
+                                className="w-full btn-primary py-3 mt-2"
+                            >
+                                Save Recovery Email
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

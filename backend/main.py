@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from starlette.responses import FileResponse, HTMLResponse
 
-from . import models, schemas, crud, database, auth
+from . import models, schemas, crud, database, auth, config, email_utils
 from fastapi import WebSocket, WebSocketDisconnect
 import json
 
@@ -272,6 +272,215 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         "is_admin": is_admin(user),
         "require_password_change": user.require_password_change
     }
+
+# --- Registration & Password Reset ---
+
+@app.post("/api/register")
+def register(
+    username: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    import re
+    
+    # Validate username
+    if not re.match(r'^[a-zA-Z0-9_]+$', username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username can only contain letters, numbers, and underscores"
+        )
+        
+    # Check if username exists
+    existing_user = crud.get_user(db, username)
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    # Validate email
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(email_pattern, email):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+    
+    # Check if email exists
+    existing_email = db.query(models.User).filter(models.User.email == email).first()
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already registered")
+        
+    # Validate password strength
+    is_valid, error_msg = auth.validate_password(password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+        
+    # Create user
+    user_data = schemas.UserCreate(
+        username=username,
+        email=email,
+        password=password,
+        root_path=f"/users/{username}",
+        is_admin=False,
+        is_super_admin=False,
+        user_level="read-write",
+        require_password_change=False
+    )
+    
+    new_user = crud.create_user(db, user_data)
+    
+    # Create the physical folder for the user
+    storage_root = os.getenv("STORAGE_ROOT", "./storage")
+    user_physical_path = os.path.join(storage_root, "users", username)
+    os.makedirs(user_physical_path, exist_ok=True)
+    
+    # Create access token for immediate login
+    access_token = auth.create_access_token(data={"sub": new_user.username})
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "username": new_user.username,
+        "message": "Account created successfully"
+    }
+
+@app.post("/api/forgot-password")
+def forgot_password(
+    email: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Request password reset. Sends reset token to user email."""
+    import secrets
+    from datetime import datetime, timedelta
+    
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        # Don't reveal if email exists
+        return {"message": "If the email exists, a password reset link has been sent"}
+    
+    reset_token = secrets.token_urlsafe(32)
+    expiry = datetime.utcnow() + timedelta(hours=1)
+    
+    if not hasattr(app.state, 'reset_tokens'):
+        app.state.reset_tokens = {}
+    
+    app.state.reset_tokens[reset_token] = {
+        'email': email,
+        'expiry': expiry
+    }
+    
+    print(f"Password reset token for {email}: {reset_token}")
+    print(f"Reset link: http://localhost:30815/reset-password?token={reset_token}")
+
+    # Attempt to send email
+    email_utils.send_password_reset_email(email, reset_token)
+
+    return {
+        "message": "If the email exists, a password reset link has been sent",
+        "token": reset_token
+    }
+
+@app.post("/api/reset-password")
+def reset_password(
+    token: str = Form(...),
+    new_password: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Reset password using token from email."""
+    from datetime import datetime
+    
+    if not hasattr(app.state, 'reset_tokens') or token not in app.state.reset_tokens:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    
+    token_data = app.state.reset_tokens[token]
+    
+    if datetime.utcnow() > token_data['expiry']:
+        del app.state.reset_tokens[token]
+        raise HTTPException(status_code=400, detail="Reset token has expired")
+    
+    is_valid, error_msg = auth.validate_password(new_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    user = db.query(models.User).filter(models.User.email == token_data['email']).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.hashed_password = auth.get_password_hash(new_password)
+    db.commit()
+    
+    del app.state.reset_tokens[token]
+    
+    return {"message": "Password reset successfully"}
+
+@app.put("/api/account/settings")
+def update_account_settings(
+    new_username: str = Form(None),
+    new_email: str = Form(None),
+    current_password: str = Form(...),
+    new_password: str = Form(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Update user account settings (username, email, password)."""
+    import re
+    
+    # Verify current password
+    if not auth.verify_password(current_password, current_user.hashed_password):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    
+    # Update username if provided
+    if new_username and new_username != current_user.username:
+        # Validate username format
+        if not re.match(r'^[a-zA-Z0-9_]+$', new_username):
+            raise HTTPException(
+                status_code=400,
+                detail="Username can only contain letters, numbers, and underscores"
+            )
+        
+        # Check if username already exists
+        existing_user = crud.get_user(db, new_username)
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Username already exists")
+        
+        # Update username
+        current_user.username = new_username
+    
+    # Update email if provided
+    if new_email and new_email != current_user.email:
+        # Validate email format
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, new_email):
+            raise HTTPException(status_code=400, detail="Invalid email format")
+        
+        # Check if email already exists
+        existing_email = db.query(models.User).filter(models.User.email == new_email).first()
+        if existing_email and existing_email.id != current_user.id:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # Update email
+        current_user.email = new_email
+    
+    # Update password if provided
+    if new_password:
+        # Validate new password
+        is_valid, error_msg = auth.validate_password(new_password)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Update password
+        current_user.hashed_password = auth.get_password_hash(new_password)
+    
+    db.commit()
+    db.refresh(current_user)
+    
+    # Create new token if username changed
+    if new_username and new_username != current_user.username:
+        access_token = auth.create_access_token(data={"sub": current_user.username})
+        return {
+            "message": "Account settings updated successfully",
+            "username_changed": True,
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
+    
+    return {"message": "Account settings updated successfully"}
 
 # --- User Endpoints ---
 @app.get("/api/users/me", response_model=schemas.User)
@@ -951,6 +1160,67 @@ def read_group(group_name: str, db: Session = Depends(get_db), current_user: mod
     if not db_group:
         raise HTTPException(status_code=404, detail="Group not found")
     return db_group
+
+
+# --- Server Configuration ---
+@app.get("/api/config")
+def get_server_config(current_user: models.User = Depends(get_current_user)):
+    """Get current server configuration"""
+    if not is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return config.get_config().get_all()
+
+@app.put("/api/config")
+def update_server_config(
+    new_config: dict, 
+    current_user: models.User = Depends(get_current_user)
+):
+    """Update server configuration"""
+    if not is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    cfg = config.get_config()
+    
+    # Validate
+    is_valid, error = cfg.validate_config(new_config)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error)
+    
+    # Update
+    if cfg.update_all(new_config):
+        return {"message": "Configuration saved successfully"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save configuration")
+
+@app.post("/api/config/reset")
+def reset_server_config(current_user: models.User = Depends(get_current_user)):
+    """Reset configuration to defaults"""
+    if not is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    cfg = config.get_config()
+    if cfg.reset_to_defaults():
+        return {"message": "Configuration reset to defaults", "config": cfg.get_all()}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to reset configuration")
+
+@app.get("/api/server/info")
+def get_server_info(current_user: models.User = Depends(get_current_user)):
+    """Get server information"""
+    if not is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    cfg = config.get_config()
+    
+    # Calculate active connections (sum of all files)
+    active_connections = sum(len(conns) for conns in manager.active_connections.values())
+    
+    return {
+        "version": "1.1.0",
+        "active_websocket_connections": active_connections,
+        "storage_root": os.path.abspath(cfg.get("storage", "root_path")),
+        "db_path": os.path.abspath("./fileserver.db")
+    }
 
 
 # WebSocket endpoint for collaborative editing
