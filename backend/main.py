@@ -485,6 +485,10 @@ def update_account_settings(
 # --- User Endpoints ---
 @app.get("/api/users/me", response_model=schemas.User)
 def read_users_me(current_user: models.User = Depends(get_current_user)):
+    # Ensure is_admin and is_super_admin reflect group membership
+    # The DB flag might be False even if the user is in the super_admins group
+    current_user.is_admin = is_admin(current_user)
+    current_user.is_super_admin = is_super_admin(current_user)
     return current_user
 
 @app.get("/api/users", response_model=List[schemas.User])
@@ -592,6 +596,63 @@ def change_password(
 
 
 # --- File Endpoints ---
+@app.get("/api/f/{url_id}")
+def access_file_by_id(url_id: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Access file or folder by unique encrypted ID"""
+    entry = crud.get_file_entry_by_id(db, url_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="File ID not found")
+    
+    cfg = config.get_config()
+    storage_root = os.path.abspath(cfg.get("storage", "root_path"))
+    abs_path = os.path.join(storage_root, entry.path)
+    
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="File content not found")
+        
+    # Permission Check
+    # 1. Admin always has access
+    if not is_admin(current_user):
+        # 2. Check if inside user's root
+        user_root = os.path.abspath(os.path.join(storage_root, current_user.root_path.strip("/")))
+        if not abs_path.startswith(user_root):
+            # 3. Check if explicitly shared with user
+            # This is complex as shares are stored by relative path. 
+            # For now, deny access if not in user root.
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    if os.path.isdir(abs_path):
+        # Return directory listing for this ID
+        try:
+            items = []
+            for item_name in os.listdir(abs_path):
+                item_path = os.path.join(abs_path, item_name)
+                is_dir = os.path.isdir(item_path)
+                size = 0 if is_dir else os.path.getsize(item_path)
+                modified = os.path.getmtime(item_path)
+                
+                # Get ID for child
+                rel_path = os.path.relpath(item_path, start=storage_root).replace("\\", "/")
+                child_entry = crud.get_or_create_file_entry(db, rel_path, is_directory=is_dir)
+                
+                items.append({
+                    "name": item_name,
+                    "is_dir": is_dir,
+                    "size": size,
+                    "modified": modified,
+                    "path": item_name, # Path in ID view is just name? Or we shouldn't expose path?
+                    # The frontend expects 'path' for navigation. 
+                    # If we are in ID mode, maybe path should be ignored or relative?
+                    # For now keep name.
+                    "url_id": child_entry.url_id
+                })
+            return items
+        except OSError as e:
+             raise HTTPException(status_code=500, detail=f"Failed to list directory: {e}")
+             
+    else:
+        return FileResponse(abs_path)
+
 @app.get("/api/files/{path:path}")
 def list_or_get_file(path: str = "", db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     safe_path = None
@@ -619,18 +680,33 @@ def list_or_get_file(path: str = "", db: Session = Depends(get_db), current_user
     
     if os.path.isdir(safe_path):
         try:
+            cfg = config.get_config()
+            storage_root = os.path.abspath(cfg.get("storage", "root_path"))
+            
             items = []
             for item_name in os.listdir(safe_path):
                 item_path = os.path.join(safe_path, item_name)
                 is_dir = os.path.isdir(item_path)
                 size = 0 if is_dir else os.path.getsize(item_path)
                 modified = os.path.getmtime(item_path)
+                
+                # Get/Create Encrypted ID
+                # Calculate relative path from storage root
+                try:
+                    rel_path = os.path.relpath(item_path, start=storage_root).replace("\\", "/")
+                    entry = crud.get_or_create_file_entry(db, rel_path, is_directory=is_dir)
+                    url_id = entry.url_id
+                except ValueError:
+                    # Fallback if path calculation fails (e.g. diff drives)
+                    url_id = None
+                
                 items.append({
                     "name": item_name,
                     "is_dir": is_dir,
                     "size": size,
                     "modified": modified,
-                    "path": os.path.join(path, item_name).replace("\\", "/") if path else item_name
+                    "path": os.path.join(path, item_name).replace("\\", "/") if path else item_name,
+                    "url_id": url_id
                 })
             return items
         except OSError as e:
@@ -661,6 +737,16 @@ async def upload_files(
             ext = os.path.splitext(file.filename)[1].lower()
             if ext not in allowed_set:
                  raise HTTPException(status_code=403, detail=f"File type not allowed: {ext}")
+
+    # Check max files limit for folder uploads (batch uploads)
+    cfg = config.get_config()
+    max_files = cfg.get("limits", "max_folder_upload_files", 1000)
+    
+    if len(files) > max_files:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many files in upload. Maximum allowed is {max_files} files per batch."
+        )
 
     try:
         safe_path = get_safe_path(current_user, path)
@@ -863,6 +949,44 @@ def delete_file(path: str, current_user: models.User = Depends(get_current_user)
         os.remove(safe_path)
     return {"status": "deleted"}
 
+@app.post("/api/rename")
+def rename_item(
+    item: schemas.RenameItem,
+    current_user: models.User = Depends(get_current_user)
+):
+    # Check permissions - renaming requires can_upload (write) and can_delete (move)
+    auth.check_permission(current_user, 'can_upload')
+    auth.check_permission(current_user, 'can_delete')
+    
+    try:
+        # Get safe source path
+        safe_old_path = get_safe_path(current_user, item.path)
+        if not os.path.exists(safe_old_path):
+             raise HTTPException(status_code=404, detail="Item not found")
+        
+        # Calculate new path
+        # The new name is just the name, not a path. It stays in the same directory.
+        parent_dir = os.path.dirname(safe_old_path)
+        safe_new_path = os.path.join(parent_dir, item.new_name)
+        
+        # Verify the new path is safe (still within allowed root)
+        # This is implicitly safe if parent_dir is safe, but good to double check 
+        # against navigation attacks like "../../foo"
+        if not os.path.abspath(safe_new_path).startswith(parent_dir):
+             raise HTTPException(status_code=400, detail="Invalid new name")
+             
+        if os.path.exists(safe_new_path):
+             raise HTTPException(status_code=409, detail="Item with that name already exists")
+             
+        shutil.move(safe_old_path, safe_new_path)
+        return {"status": "renamed"}
+        
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(f"Rename error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to rename: {str(e)}")
+
 # --- Sharing Endpoints ---
 @app.post("/api/share")
 def share_folder(
@@ -905,7 +1029,7 @@ async def unshare_folder(share_id: int, db: Session = Depends(get_db), current_u
 # --- Group Endpoints ---
 @app.post("/api/groups/", response_model=schemas.Group)
 def create_group(group: schemas.GroupCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
     db_group = crud.get_group(db, group_name=group.name)
     if db_group:
@@ -914,14 +1038,14 @@ def create_group(group: schemas.GroupCreate, db: Session = Depends(get_db), curr
 
 @app.get("/api/groups/", response_model=List[schemas.Group])
 def read_groups(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
     groups = crud.get_groups(db, skip=skip, limit=limit)
     return groups
 
 @app.get("/api/groups/{group_name}/", response_model=schemas.Group)
 def read_group(group_name: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
     db_group = crud.get_group(db, group_name=group_name)
     if db_group is None:
@@ -930,7 +1054,7 @@ def read_group(group_name: str, db: Session = Depends(get_db), current_user: mod
 
 @app.put("/api/groups/{group_name}/", response_model=schemas.Group)
 def update_group(group_name: str, group: schemas.GroupUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
     db_group = crud.update_group(db, group_name=group_name, group_update=group)
     if db_group is None:
@@ -939,7 +1063,7 @@ def update_group(group_name: str, group: schemas.GroupUpdate, db: Session = Depe
 
 @app.delete("/api/groups/{group_name}/")
 def delete_group(group_name: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
         
     if group_name in ['admins', 'super_admins']:
@@ -1119,7 +1243,7 @@ def shutdown_event():
 # Group Management Endpoints
 @app.post("/api/groups/", response_model=schemas.Group)
 def create_group(group: schemas.GroupCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
     db_group = crud.get_group(db, group_name=group.name)
     if db_group:
@@ -1128,14 +1252,14 @@ def create_group(group: schemas.GroupCreate, db: Session = Depends(get_db), curr
 
 @app.get("/api/groups/", response_model=List[schemas.Group])
 def read_groups(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
     groups = crud.get_groups(db, skip=skip, limit=limit)
     return groups
 
 @app.delete("/api/groups/{group_name}/")
 def delete_group(group_name: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
     db_group = crud.get_group(db, group_name=group_name)
     if not db_group:
@@ -1145,7 +1269,7 @@ def delete_group(group_name: str, db: Session = Depends(get_db), current_user: m
 
 @app.put("/api/groups/{group_name}/", response_model=schemas.Group)
 def update_group(group_name: str, group_update: schemas.GroupUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
     db_group = crud.update_group(db, group_name=group_name, group_update=group_update)
     if not db_group:
@@ -1154,7 +1278,7 @@ def update_group(group_name: str, group_update: schemas.GroupUpdate, db: Session
 
 @app.get("/api/groups/{group_name}/", response_model=schemas.Group)
 def read_group(group_name: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not current_user.is_admin:
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
     db_group = crud.get_group(db, group_name=group_name)
     if not db_group:
@@ -1163,6 +1287,14 @@ def read_group(group_name: str, db: Session = Depends(get_db), current_user: mod
 
 
 # --- Server Configuration ---
+@app.get("/api/public-config")
+def get_public_config(current_user: models.User = Depends(get_current_user)):
+    """Get public configuration available to all authenticated users"""
+    cfg = config.get_config()
+    return {
+        "public_url": cfg.get("server", "public_url")
+    }
+
 @app.get("/api/config")
 def get_server_config(current_user: models.User = Depends(get_current_user)):
     """Get current server configuration"""
@@ -1289,7 +1421,7 @@ def startup_event():
             root_path="/",
             is_admin=True,
             is_super_admin=True,
-            require_password_change=True,  # Force password change on first login
+            require_password_change=False,  # Force password change on first login
             groups=["super_admins"]  # Add to super_admins group
         ))
         print("Created default admin user (username: admin, password: adminpassword)")

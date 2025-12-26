@@ -77,9 +77,14 @@ class FileInfo(BaseModel):
     is_dir: bool
     size: Optional[int] = None
     path: str
+    url_id: Optional[str] = None
 
 class FolderCreate(BaseModel):
     name: str
+
+class RenameItem(BaseModel):
+    path: str
+    new_name: str
 
 class ShareFolder(BaseModel):
     folder_path: str  # Can be file or folder path

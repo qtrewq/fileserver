@@ -34,6 +34,7 @@ DEFAULT_CONFIG = {
         "max_users": 1000,
         "max_groups": 100,
         "max_concurrent_connections": 100,
+        "max_folder_upload_files": 1000,
     },
     "smtp": {
         "enabled": False,
@@ -154,7 +155,7 @@ class ServerConfig:
             
             # Validate limits
             if "limits" in config:
-                for key in ["max_users", "max_groups", "max_concurrent_connections"]:
+                for key in ["max_users", "max_groups", "max_concurrent_connections", "max_folder_upload_files"]:
                     value = config["limits"].get(key)
                     if value and (not isinstance(value, int) or value <= 0):
                         return False, f"{key} must be a positive integer"

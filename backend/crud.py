@@ -1,11 +1,12 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+import secrets
 from . import models, schemas, auth
 
 def get_user(db: Session, username: str):
-    return db.query(models.User).filter(models.User.username == username).first()
+    return db.query(models.User).options(joinedload(models.User.groups)).filter(models.User.username == username).first()
 
 def get_users(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.User).offset(skip).limit(limit).all()
+    return db.query(models.User).options(joinedload(models.User.groups)).offset(skip).limit(limit).all()
 
 def count_enabled_super_admins(db: Session) -> int:
     """Count the number of enabled users in the 'super_admins' group."""
@@ -79,7 +80,7 @@ def update_user(db: Session, username: str, user_update: schemas.UserUpdate):
 
 # Group operations
 def get_group(db: Session, group_name: str):
-    return db.query(models.Group).filter(models.Group.name == group_name).first()
+    return db.query(models.Group).options(joinedload(models.Group.folder_permissions)).filter(models.Group.name == group_name).first()
 
 def get_groups(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.Group).offset(skip).limit(limit).all()
@@ -207,3 +208,34 @@ def create_folder_share(db: Session, folder_path: str, owner_username: str, shar
     db.commit()
     db.refresh(db_share)
     return db_share
+
+def generate_url_id():
+    chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    return "".join(secrets.choice(chars) for _ in range(16))
+
+def get_or_create_file_entry(db: Session, path: str, is_directory: bool = False) -> models.FileEntry:
+    path = path.replace("\\", "/") # Normalize separators
+    
+    entry = db.query(models.FileEntry).filter(models.FileEntry.path == path).first()
+    if entry:
+        return entry
+    
+    while True:
+        url_id = generate_url_id()
+        if not db.query(models.FileEntry).filter(models.FileEntry.url_id == url_id).first():
+            break
+            
+    entry = models.FileEntry(path=path, url_id=url_id, is_directory=is_directory)
+    db.add(entry)
+    try:
+        db.commit()
+        db.refresh(entry)
+    except:
+        db.rollback()
+        # Handle race condition
+        entry = db.query(models.FileEntry).filter(models.FileEntry.path == path).first()
+        
+    return entry
+
+def get_file_entry_by_id(db: Session, url_id: str):
+    return db.query(models.FileEntry).filter(models.FileEntry.url_id == url_id).first()

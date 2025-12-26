@@ -2,7 +2,7 @@
   "server": {
     "port": 30815,
     "host": "0.0.0.0",
-    "public_url": "file.aqueous.lol",
+    "public_url": "http://file.aqueous.lol",
     "reload": true
   },
   "security": {
@@ -12,7 +12,7 @@
     "session_timeout_minutes": 480
   },
   "storage": {
-    "root_path": "./storage"
+    "root_path": "I:\\dwonloads"
   },
   "features": {
     "enable_file_sharing": true,
@@ -22,7 +22,8 @@
   "limits": {
     "max_users": 1000,
     "max_groups": 100,
-    "max_concurrent_connections": 100
+    "max_concurrent_connections": 100,
+    "max_folder_upload_files": 10000
   },
   "smtp": {
     "enabled": true,

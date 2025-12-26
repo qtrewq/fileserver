@@ -7,7 +7,7 @@ import {
     Folder, File, FileText, Image as ImageIcon, Music, Video,
     Download, Trash2, Upload, Home, LogOut, Settings, ChevronRight,
     RefreshCw, X, FolderPlus, Share2, Users, Check, Key, Menu, Grid3x3, List, LayoutGrid, Edit, Save, Play, Terminal, FolderUp,
-    ArrowUpDown, ArrowUp, ArrowDown, User
+    ArrowUpDown, ArrowUp, ArrowDown, User, Link as LinkIcon, Mail
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -31,6 +31,9 @@ export default function Dashboard() {
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
+    const [showRenameModal, setShowRenameModal] = useState(false);
+    const [renameItem, setRenameItem] = useState(null);
+    const [newName, setNewName] = useState('');
     const [viewMode, setViewMode] = useState('home'); // 'home', 'shared', or 'user:<username>'
     const [sharedItems, setSharedItems] = useState([]);
     const [showNavMenu, setShowNavMenu] = useState(false);
@@ -770,7 +773,7 @@ export default function Dashboard() {
 
     const formatDate = (timestamp) => {
         if (!timestamp) return '-';
-        const date = new Date(timestamp);
+        const date = new Date(timestamp * 1000);
         const now = new Date();
         const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
 
@@ -781,6 +784,25 @@ export default function Dashboard() {
         } else {
             return date.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) + ' ' +
                 date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        }
+    };
+
+    const handleRename = async () => {
+        if (!newName || !renameItem) return;
+
+        try {
+            const path = currentPath ? `${currentPath}/${renameItem.name}` : renameItem.name;
+            await api.post('/rename', {
+                path: path,
+                new_name: newName
+            });
+            setShowRenameModal(false);
+            setRenameItem(null);
+            setNewName('');
+            fetchItems();
+        } catch (err) {
+            console.error(err);
+            alert(err.response?.data?.detail || 'Failed to rename item');
         }
     };
 
@@ -868,6 +890,35 @@ export default function Dashboard() {
                                 Create
                             </button>
                             <button onClick={() => setShowNewFolderModal(false)} className="btn-secondary flex-1 py-3">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Rename Modal */}
+            {showRenameModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowRenameModal(false)}>
+                    <div className="bg-slate-900 rounded-xl p-6 w-full max-w-md shadow-2xl border border-white/10" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                            <Edit className="w-6 h-6 text-blue-500" />
+                            Rename Item
+                        </h3>
+                        <input
+                            type="text"
+                            value={newName}
+                            onChange={(e) => setNewName(e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && handleRename()}
+                            className="input-field mb-4"
+                            placeholder="New name"
+                            autoFocus
+                        />
+                        <div className="flex gap-3">
+                            <button onClick={handleRename} className="btn-primary flex-1 py-3">
+                                Rename
+                            </button>
+                            <button onClick={() => setShowRenameModal(false)} className="btn-secondary flex-1 py-3">
                                 Cancel
                             </button>
                         </div>
@@ -1156,6 +1207,18 @@ export default function Dashboard() {
                                     >
                                         <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
                                         Delete
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setRenameItem(contextMenu.item);
+                                            setNewName(contextMenu.item.name);
+                                            setShowRenameModal(true);
+                                            setContextMenu(null);
+                                        }}
+                                        className="w-full px-4 py-3 md:py-2 text-left hover:bg-white/10 flex items-center gap-3 text-slate-200 transition-colors active:bg-white/20"
+                                    >
+                                        <Edit className="w-5 h-5 md:w-4 md:h-4" />
+                                        Rename
                                     </button>
                                 </>
                             )}

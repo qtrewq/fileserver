@@ -65,3 +65,11 @@ class FolderShare(Base):
     shared_with_username = Column(String, index=True)
     permission = Column(String, default='read')  # 'read' or 'write'
     is_file = Column(Boolean, default=False)  # True if sharing a file, False if folder
+
+class FileEntry(Base):
+    __tablename__ = "file_entries"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    path = Column(String, unique=True, index=True)  # Path relative to storage root
+    url_id = Column(String(16), unique=True, index=True)
+    is_directory = Column(Boolean, default=False)
