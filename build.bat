@@ -13,6 +13,9 @@ if errorlevel 1 (
 ) else (
     echo Step 1: Building frontend...
     echo.
+    echo Syncing version number...
+    python sync_version.py
+    echo.
     cd frontend
     
     REM Check if node_modules exists

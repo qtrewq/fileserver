@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 from typing import List
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request
@@ -6,9 +7,11 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from starlette.responses import FileResponse, HTMLResponse
+from starlette.responses import FileResponse, HTMLResponse, StreamingResponse
+import mimetypes
 
 from . import models, schemas, crud, database, auth, config, email_utils
+from .range_utils import range_requests_response
 from fastapi import WebSocket, WebSocketDisconnect
 import json
 
@@ -116,14 +119,26 @@ def get_db():
     finally:
         db.close()
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token", auto_error=False)
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_user(
+    request: Request,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    # Try getting token from query string if not in header
+    if not token:
+        token = request.query_params.get("token")
+    
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
+    if not token:
+        raise credentials_exception
+
     payload = auth.verify_token(token)
     if payload is None:
         raise credentials_exception
@@ -159,7 +174,8 @@ def is_super_admin(user: models.User) -> bool:
 
 
 def get_safe_path(user: models.User, path: str = ""):
-    storage_root = os.path.abspath(os.getenv("STORAGE_ROOT", "./storage"))
+    cfg = config.get_config()
+    storage_root = os.path.abspath(cfg.get("storage", "root_path", "./storage"))
     
     # Debug output
     print(f"[DEBUG] get_safe_path called:")
@@ -595,9 +611,105 @@ def change_password(
     return {"status": "password changed"}
 
 
+@app.get("/api/zip-content/{path:path}")
+def inspect_zip_content(path: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Inspect ZIP file contents without extracting"""
+    import zipfile
+    
+    try:
+        safe_path = get_safe_path(current_user, path)
+    except:
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    if not os.path.exists(safe_path) or not os.path.isfile(safe_path):
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    if not zipfile.is_zipfile(safe_path):
+        raise HTTPException(status_code=400, detail="Not a valid ZIP file")
+        
+    try:
+        with zipfile.ZipFile(safe_path, 'r') as zip_ref:
+            file_list = []
+            for info in zip_ref.infolist():
+                # Normalized path for display
+                # encoding fix might be needed for non-utf8 zips, but standard is CP437 or UTF8
+                try:
+                    name = info.filename
+                except:
+                    name = str(info.filename)
+                    
+                file_list.append({
+                    "path": name,
+                    "size": info.file_size,
+                    "compressed_size": info.compress_size,
+                    "is_dir": info.is_dir(),
+                    "modified": f"{info.date_time[0]}-{info.date_time[1]:02d}-{info.date_time[2]:02d} {info.date_time[3]:02d}:{info.date_time[4]:02d}"
+                })
+            return file_list
+    except zipfile.BadZipFile:
+         raise HTTPException(status_code=400, detail="Corrupted ZIP file")
+    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"Failed to read ZIP: {str(e)}")
+
+@app.get("/api/thumbnail/{path:path}")
+def get_thumbnail(
+    path: str, 
+    w: int = 200, 
+    h: int = 200, 
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(get_current_user)
+):
+    """Generate and return a thumbnail for an image"""
+    from PIL import Image, ImageOps
+    import hashlib
+    
+    try:
+        safe_path = get_safe_path(current_user, path)
+    except:
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    if not os.path.exists(safe_path) or not os.path.isfile(safe_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Simple cache mechanism
+    # Create cache dir in storage root .cache/thumbnails
+    cfg = config.get_config()
+    storage_root = os.path.abspath(cfg.get("storage", "root_path"))
+    cache_dir = os.path.join(storage_root, ".cache", "thumbnails")
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Cache key based on file path, mtime, and size (invalidator)
+    mtime = os.path.getmtime(safe_path)
+    file_hash = hashlib.md5(f"{safe_path}_{mtime}_{w}x{h}".encode()).hexdigest()
+    cache_path = os.path.join(cache_dir, f"{file_hash}.jpg")
+    
+    if os.path.exists(cache_path):
+        return FileResponse(cache_path)
+        
+    try:
+        # Generate thumbnail
+        with Image.open(safe_path) as img:
+            # Convert to RGB (handles RGBA, P, etc)
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+                
+            # Resize/Crop to fill square
+            thumb = ImageOps.fit(img, (w, h), Image.Resampling.LANCZOS)
+            
+            # Save to cache
+            thumb.save(cache_path, "JPEG", quality=80)
+            
+        return FileResponse(cache_path)
+    except Exception as e:
+        print(f"Thumbnail generation failed: {e}")
+        # Fallback to original image if generation fails (or placeholder)
+        # But for large images this defeats the purpose.
+        # Check if it was an image error
+        raise HTTPException(status_code=500, detail="Could not generate thumbnail")
+
 # --- File Endpoints ---
 @app.get("/api/f/{url_id}")
-def access_file_by_id(url_id: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def access_file_by_id(request: Request, url_id: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """Access file or folder by unique encrypted ID"""
     entry = crud.get_file_entry_by_id(db, url_id)
     if not entry:
@@ -651,10 +763,72 @@ def access_file_by_id(url_id: str, db: Session = Depends(get_db), current_user: 
              raise HTTPException(status_code=500, detail=f"Failed to list directory: {e}")
              
     else:
-        return FileResponse(abs_path)
+        return range_requests_response(
+            request, 
+            file_path=abs_path, 
+            content_type=mimetypes.guess_type(abs_path)[0]
+        )
+
+@app.get("/api/search")
+def search_files(
+    q: str, 
+    path: str = "", 
+    scope: str = "global", 
+    limit: int = 100,
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(get_current_user)
+):
+    """Search for files and folders recursively."""
+    if not q:
+        return []
+    
+    try:
+        # 1. Determine search root
+        if scope == "scoped":
+            search_root = get_safe_path(current_user, path)
+        else:
+            # Global search starts from user's root_path
+            search_root = get_safe_path(current_user, "")
+            
+        cfg = config.get_config()
+        storage_root = os.path.abspath(cfg.get("storage", "root_path"))
+        
+        results = []
+        q_lower = q.lower()
+        
+        # 2. Recursive search
+        for root, dirs, files in os.walk(search_root):
+            # Check both directories and files
+            for name in dirs + files:
+                if q_lower in name.lower():
+                    full_path = os.path.join(root, name)
+                    is_dir = os.path.isdir(full_path)
+                    
+                    # Calculate relative path for navigation
+                    # This must be relative to the user's root for the frontend to work
+                    rel_path = os.path.relpath(full_path, start=os.path.join(storage_root, current_user.root_path.strip("/"))).replace("\\", "/")
+                    if rel_path == ".": rel_path = ""
+                    
+                    results.append({
+                        "name": name,
+                        "is_dir": is_dir,
+                        "size": 0 if is_dir else os.path.getsize(full_path),
+                        "modified": os.path.getmtime(full_path),
+                        "path": rel_path,
+                        "search_result": True # Flag for UI
+                    })
+                    
+                    # Stop if limit reached
+                    if limit > 0 and len(results) >= limit:
+                        return results
+                        
+        return results
+    except Exception as e:
+        print(f"Search error: {e}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 @app.get("/api/files/{path:path}")
-def list_or_get_file(path: str = "", db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def list_or_get_file(request: Request, path: str = "", db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     safe_path = None
     try:
         safe_path = get_safe_path(current_user, path)
@@ -691,14 +865,10 @@ def list_or_get_file(path: str = "", db: Session = Depends(get_db), current_user
                 modified = os.path.getmtime(item_path)
                 
                 # Get/Create Encrypted ID
-                # Calculate relative path from storage root
-                try:
-                    rel_path = os.path.relpath(item_path, start=storage_root).replace("\\", "/")
-                    entry = crud.get_or_create_file_entry(db, rel_path, is_directory=is_dir)
-                    url_id = entry.url_id
-                except ValueError:
-                    # Fallback if path calculation fails (e.g. diff drives)
-                    url_id = None
+                # Skip Eager creation for listing performance
+                # DB Access here is O(N) which kills performance for large directories
+                # IDs are only needed for public sharing, generated on demand.
+                url_id = None
                 
                 items.append({
                     "name": item_name,
@@ -714,7 +884,11 @@ def list_or_get_file(path: str = "", db: Session = Depends(get_db), current_user
             raise HTTPException(status_code=500, detail=f"[ERR_LIST_DIR] Failed to list directory: {str(e)}")
             
     elif os.path.isfile(safe_path):
-        return FileResponse(safe_path)
+        return range_requests_response(
+            request, 
+            file_path=safe_path, 
+            content_type=mimetypes.guess_type(safe_path)[0]
+        )
     else:
         raise HTTPException(status_code=404, detail="[ERR_NOT_FOUND] File or directory not found")
 
@@ -722,10 +896,43 @@ def list_or_get_file(path: str = "", db: Session = Depends(get_db), current_user
 async def upload_files(
     path: str = "",
     files: List[UploadFile] = File(...),
-    current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     # Check permission
     auth.check_permission(current_user, 'can_upload')
+    
+    # Calculate Quota
+    quota = current_user.storage_quota
+    
+    if quota is None:
+        # Check groups (max of all groups)
+        group_quotas = [g.max_storage_quota for g in current_user.groups if g.max_storage_quota is not None]
+        if group_quotas:
+            quota = max(group_quotas)
+            
+    if quota is None:
+        # Global default
+        cfg = config.get_config()
+        limit_mb = cfg.get("limits", "default_user_storage_limit_mb", 0)
+        if limit_mb > 0:
+            quota = limit_mb * 1024 * 1024
+            
+    # Check quota validation
+    if quota is not None:
+        upload_total_size = 0
+        for file in files:
+            # We need to read size roughly. Content-Length header is unreliable in multipart.
+            # We have to verify actual size to be safe.
+            # Reading entire file might be slow but necessary for strict quota.
+            content = await file.read()
+            upload_total_size += len(content)
+            await file.seek(0) # Reset cursor
+            
+        current_usage = current_user.used_storage or 0
+        if current_usage + upload_total_size > quota:
+             raise HTTPException(status_code=413, detail=f"Storage quota exceeded. Available: {(quota - current_usage) / 1024 / 1024:.2f} MB")
+
     
     # Check file types if restricted
     perms = auth.resolve_user_permissions(current_user)
@@ -823,6 +1030,7 @@ async def upload_files(
             except OSError as e:
                 raise HTTPException(status_code=500, detail=f"[ERR_FILE_WRITE] Failed to write file {file.filename}: {str(e)}")
         
+        crud.update_user_storage_usage(db, current_user.username, total_size)
         return {"status": "uploaded", "files": uploaded_files}
     except HTTPException as e:
         raise e
@@ -865,9 +1073,37 @@ async def save_file(
         if not safe_path:
             raise HTTPException(status_code=404, detail="File not found or access denied")
         
+        # Quota check
+        new_content_bytes = content.encode('utf-8')
+        new_size = len(new_content_bytes)
+        old_size = 0
+        if os.path.exists(safe_path):
+            old_size = os.path.getsize(safe_path)
+            
+        delta = new_size - old_size
+        
+        if delta > 0:
+            quota = current_user.storage_quota
+            if quota is None:
+                group_quotas = [g.max_storage_quota for g in current_user.groups if g.max_storage_quota is not None]
+                if group_quotas:
+                     quota = max(group_quotas)
+            if quota is None:
+                cfg = config.get_config()
+                limit_mb = cfg.get("limits", "default_user_storage_limit_mb", 0)
+                if limit_mb > 0:
+                     quota = limit_mb * 1024 * 1024
+                     
+            if quota is not None:
+                 current_usage = current_user.used_storage or 0
+                 if current_usage + delta > quota:
+                      raise HTTPException(status_code=413, detail="Storage quota exceeded")
+
         # Write content
         with open(safe_path, "w", encoding="utf-8") as f:
             f.write(content)
+            
+        crud.update_user_storage_usage(db, current_user.username, delta)
         
         # Broadcast update to WebSocket clients
         try:
@@ -940,13 +1176,29 @@ def create_folder(path: str = "", name: str = Form(...), current_user: models.Us
         raise HTTPException(status_code=500, detail=f"[ERR_FOLDER_GENERIC] Failed to create folder: {str(e)}")
 
 @app.delete("/api/files/{path:path}")
-def delete_file(path: str, current_user: models.User = Depends(get_current_user)):
+def delete_file(path: str, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     auth.check_permission(current_user, 'can_delete')
     safe_path = get_safe_path(current_user, path)
-    if os.path.isdir(safe_path):
-        shutil.rmtree(safe_path)
-    else:
-        os.remove(safe_path)
+    
+    deleted_size = 0
+    if os.path.exists(safe_path):
+        try:
+            if os.path.isdir(safe_path):
+                for root, dirs, files in os.walk(safe_path):
+                    for f in files:
+                        try:
+                            deleted_size += os.path.getsize(os.path.join(root, f))
+                        except: pass
+                shutil.rmtree(safe_path)
+            else:
+                deleted_size = os.path.getsize(safe_path)
+                os.remove(safe_path)
+                
+            crud.update_user_storage_usage(db, current_user.username, -deleted_size)
+        except OSError as e:
+             print(f"Delete error: {e}")
+             raise HTTPException(status_code=500, detail=f"Failed to delete item: {e}")
+             
     return {"status": "deleted"}
 
 @app.post("/api/rename")
@@ -1347,8 +1599,29 @@ def get_server_info(current_user: models.User = Depends(get_current_user)):
     # Calculate active connections (sum of all files)
     active_connections = sum(len(conns) for conns in manager.active_connections.values())
     
+    # Read version from file
+    version = "1.0.0" # Default fallback
+    try:
+        # Check current directory first
+        if os.path.exists("VERSION"):
+            with open("VERSION", "r") as f:
+                version = f.read().strip()
+        # Check parent directory (dev mode usually runs from backend dir or similar)
+        elif os.path.exists("../VERSION"):
+             with open("../VERSION", "r") as f:
+                version = f.read().strip()
+        # Check if inside PyInstaller bundle
+        elif getattr(sys, 'frozen', False):
+             base_path = sys._MEIPASS
+             version_path = os.path.join(base_path, "VERSION")
+             if os.path.exists(version_path):
+                 with open(version_path, "r") as f:
+                     version = f.read().strip()
+    except Exception as e:
+        print(f"Failed to read version file: {e}")
+
     return {
-        "version": "1.1.0",
+        "version": version,
         "active_websocket_connections": active_connections,
         "storage_root": os.path.abspath(cfg.get("storage", "root_path")),
         "db_path": os.path.abspath("./fileserver.db")

@@ -9,10 +9,12 @@ const ServerSettings = () => {
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState(null);
     const [activeTab, setActiveTab] = useState('server');
+    const [groups, setGroups] = useState([]);
 
     useEffect(() => {
         fetchConfig();
         fetchServerInfo();
+        fetchGroups();
     }, []);
 
     const fetchConfig = async () => {
@@ -33,6 +35,15 @@ const ServerSettings = () => {
             setServerInfo(response.data);
         } catch (error) {
             console.error('Error fetching server info:', error);
+        }
+    };
+
+    const fetchGroups = async () => {
+        try {
+            const response = await api.get('/groups/');
+            setGroups(response.data);
+        } catch (error) {
+            console.error('Error fetching groups:', error);
         }
     };
 
@@ -361,6 +372,33 @@ const ServerSettings = () => {
                         </div>
 
                         <div className="grid gap-6 max-w-2xl">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Default User Storage Limit (MB)</label>
+                                <input
+                                    type="number"
+                                    value={config.limits.default_user_storage_limit_mb || 0}
+                                    onChange={(e) => updateConfig('limits', 'default_user_storage_limit_mb', parseInt(e.target.value))}
+                                    min="0"
+                                    className="input-field"
+                                />
+                                <p className="text-xs text-slate-500 mt-1">Default storage quota for new users (0 for unlimited)</p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Default Registration Group</label>
+                                <select
+                                    value={config.limits.default_registration_group || ''}
+                                    onChange={(e) => updateConfig('limits', 'default_registration_group', e.target.value || null)}
+                                    className="input-field"
+                                >
+                                    <option value="">None (No default group)</option>
+                                    {groups.map(group => (
+                                        <option key={group.id} value={group.name}>{group.name}</option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-slate-500 mt-1">Group assigned to new users upon registration</p>
+                            </div>
+
                             <div>
                                 <label className="block text-sm font-medium text-slate-400 mb-1">Max Users</label>
                                 <input

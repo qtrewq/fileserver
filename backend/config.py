@@ -35,6 +35,8 @@ DEFAULT_CONFIG = {
         "max_groups": 100,
         "max_concurrent_connections": 100,
         "max_folder_upload_files": 1000,
+        "default_user_storage_limit_mb": 1024,  # Default 1GB
+        "default_registration_group": None,  # Group name
     },
     "smtp": {
         "enabled": False,

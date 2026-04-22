@@ -17,6 +17,7 @@ export default function Admin() {
     const [editRequirePasswordChange, setEditRequirePasswordChange] = useState(false);
     const [editIsDisabled, setEditIsDisabled] = useState(false);
     const [editGroups, setEditGroups] = useState([]);
+    const [editStorageQuota, setEditStorageQuota] = useState('');
     const [resetPasswordUser, setResetPasswordUser] = useState(null);
     const [newPassword, setNewPassword] = useState('');
     const [activeTab, setActiveTab] = useState('users'); // 'users', 'server'
@@ -126,12 +127,14 @@ export default function Admin() {
                 root_path: editRootPath,
                 require_password_change: editRequirePasswordChange,
                 is_disabled: editIsDisabled,
-                groups: editGroups
+                groups: editGroups,
+                storage_quota: editStorageQuota ? parseInt(editStorageQuota) * 1024 * 1024 : null
             });
             setEditingUser(null);
             setEditUsername('');
             setEditRootPath('');
             setEditGroups([]);
+            setEditStorageQuota('');
             fetchUsers();
         } catch (err) {
             alert(err.response?.data?.detail || 'Failed to update user');
@@ -662,6 +665,7 @@ export default function Admin() {
                                         <tr className="border-b border-white/10 text-slate-400 text-sm font-medium">
                                             <th className="pb-4 pl-6 w-1/6">Username</th>
                                             <th className="pb-4 px-4 w-1/6">Root Path</th>
+                                            <th className="pb-4 px-4 w-1/6">Storage</th>
                                             <th className="pb-4 px-4 w-1/5">Groups</th>
                                             <th className="pb-4 px-4 w-1/5">Role</th>
                                             <th className="pb-4 pr-6 text-right w-1/8">Actions</th>
@@ -705,6 +709,7 @@ export default function Admin() {
                                                                     setEditRequirePasswordChange(u.require_password_change || false);
                                                                     setEditIsDisabled(u.is_disabled || false);
                                                                     setEditGroups(u.groups ? u.groups.map(g => g.name) : []);
+                                                                    setEditStorageQuota(u.storage_quota ? u.storage_quota / (1024 * 1024) : '');
                                                                 }}
                                                                 className="md:opacity-0 group-hover:opacity-100 p-1 hover:bg-blue-500/20 rounded text-blue-400 transition-opacity"
                                                             >
@@ -724,6 +729,25 @@ export default function Admin() {
                                                         />
                                                     ) : (
                                                         u.root_path
+                                                    )}
+                                                </td>
+                                                <td className="py-5 px-4 text-slate-400 font-mono text-sm">
+                                                    {editingUser === u.username ? (
+                                                        <div className="flex items-center gap-1">
+                                                            <input
+                                                                type="number"
+                                                                value={editStorageQuota}
+                                                                onChange={(e) => setEditStorageQuota(e.target.value)}
+                                                                className="input-field py-1 px-2 text-sm w-20"
+                                                                placeholder="Unltd"
+                                                            />
+                                                            <span className="text-xs">MB</span>
+                                                        </div>
+                                                    ) : (
+                                                        <span className={u.used_storage > (u.storage_quota || Infinity) ? 'text-red-400' : 'text-slate-400'}>
+                                                            {((u.used_storage || 0) / (1024 * 1024)).toFixed(0)}MB
+                                                            {u.storage_quota ? ` / ${(u.storage_quota / (1024 * 1024)).toFixed(0)}MB` : ''}
+                                                        </span>
                                                     )}
                                                 </td>
                                                 <td className="py-4 text-slate-400 text-sm">

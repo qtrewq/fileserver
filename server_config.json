@@ -23,7 +23,9 @@
     "max_users": 1000,
     "max_groups": 100,
     "max_concurrent_connections": 100,
-    "max_folder_upload_files": 10000
+    "max_folder_upload_files": 10000,
+    "default_user_storage_limit_mb": 500,
+    "default_registration_group": "Users"
   },
   "smtp": {
     "enabled": true,

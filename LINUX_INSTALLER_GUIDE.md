@@ -32,15 +32,15 @@ The package includes:
 .\build_linux_installer.bat
 ```
 
-This will create: `installer_output\fileserver-linux-1.0.0.tar.gz`
+This will create: `installer_output\fileserver-linux-1.2.1.tar.gz`
 
 ### On Linux (Installing the Package)
 
 #### Method 1: Automated Installation (Recommended)
 ```bash
 # Extract the package
-tar -xzf fileserver-linux-1.0.0.tar.gz
-cd fileserver-linux-1.0.0
+tar -xzf fileserver-linux-1.2.1.tar.gz
+cd fileserver-linux-1.2.1
 
 # Run installation script as root
 sudo bash install-linux.sh
@@ -53,8 +53,8 @@ sudo systemctl enable fileserver
 #### Method 2: Manual Installation
 ```bash
 # Extract the package
-tar -xzf fileserver-linux-1.0.0.tar.gz
-cd fileserver-linux-1.0.0
+tar -xzf fileserver-linux-1.2.1.tar.gz
+cd fileserver-linux-1.2.1
 
 # Install Python dependencies
 pip3 install -r requirements.txt
@@ -72,8 +72,8 @@ python3 launcher.py
 #### Method 3: Docker Installation
 ```bash
 # Extract the package
-tar -xzf fileserver-linux-1.0.0.tar.gz
-cd fileserver-linux-1.0.0
+tar -xzf fileserver-linux-1.2.1.tar.gz
+cd fileserver-linux-1.2.1
 
 # Run with Docker Compose
 docker-compose up -d
@@ -91,7 +91,7 @@ docker-compose up -d
 - **Method 3 (Docker)**: Docker and Docker Compose
 
 ## Output
-- Package: `installer_output/fileserver-linux-1.0.0.tar.gz`
+- Package: `installer_output/fileserver-linux-1.2.1.tar.gz`
 - Size: Approximately 5-10 MB (without node_modules)
 - Format: Compressed tarball (gzip)
 

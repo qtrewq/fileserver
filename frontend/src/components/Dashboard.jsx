@@ -3,11 +3,14 @@ import { useLocation, useNavigate, Link } from 'react-router-dom';
 import api from '../api';
 import CodeEditor from './CodeEditor';
 import AccountSettings from './AccountSettings';
+import MediaPlayer from './MediaPlayer';
+import ZipViewer from './ZipViewer';
+import DocxViewer from './DocxViewer';
 import {
     Folder, File, FileText, Image as ImageIcon, Music, Video,
     Download, Trash2, Upload, Home, LogOut, Settings, ChevronRight,
     RefreshCw, X, FolderPlus, Share2, Users, Check, Key, Menu, Grid3x3, List, LayoutGrid, Edit, Save, Play, Terminal, FolderUp,
-    ArrowUpDown, ArrowUp, ArrowDown, User, Link as LinkIcon, Mail
+    ArrowUpDown, ArrowUp, ArrowDown, User, Link as LinkIcon, Mail, Search
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -56,6 +59,10 @@ export default function Dashboard() {
     const [showEmailModal, setShowEmailModal] = useState(false);
     const [recoveryEmail, setRecoveryEmail] = useState('');
     const [recoveryPassword, setRecoveryPassword] = useState('');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchScope, setSearchScope] = useState(localStorage.getItem('searchScope') || 'global'); // 'global' or 'scoped'
+    const [searchLimit, setSearchLimit] = useState(parseInt(localStorage.getItem('searchLimit') || '100')); // 0 for unlimited
+    const [isSearching, setIsSearching] = useState(false);
 
     const currentPath = location.pathname.substring(1);
 
@@ -123,6 +130,7 @@ export default function Dashboard() {
     };
 
     const fetchItems = async () => {
+        if (searchQuery.trim() !== '') return; // Don't fetch normal items if we are searching (handled by useEffect)
         setLoading(true);
         try {
             if (viewMode === 'shared') {
@@ -174,6 +182,51 @@ export default function Dashboard() {
         }
     };
 
+    const handleSearch = async () => {
+        if (searchQuery.trim() === '') {
+            setIsSearching(false);
+            fetchItems();
+            return;
+        }
+
+        setLoading(true);
+        setIsSearching(true);
+        try {
+            const res = await api.get('/search', {
+                params: {
+                    q: searchQuery,
+                    path: currentPath,
+                    scope: searchScope,
+                    limit: searchLimit
+                }
+            });
+            setItems(res.data);
+        } catch (err) {
+            console.error('Search failed:', err);
+            alert('Search failed');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const clearSearch = () => {
+        setSearchQuery('');
+        setIsSearching(false);
+        fetchItems();
+    };
+
+    // Trigger search when query/scope/limit changes (debounced)
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (searchQuery.trim() !== '') {
+                handleSearch();
+            } else if (isSearching) {
+                clearSearch();
+            }
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [searchQuery, searchScope, searchLimit]);
+
     const handleDelete = async (itemName) => {
         if (!confirm(`Are you sure you want to delete "${itemName}"?`)) return;
         try {
@@ -209,20 +262,54 @@ export default function Dashboard() {
     const handlePreview = async (item) => {
         const ext = item.name.split('.').pop().toLowerCase();
         const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
-        const isCode = ['txt', 'md', 'json', 'js', 'jsx', 'ts', 'tsx', 'py', 'css', 'html', 'xml', 'yaml', 'yml', 'sh', 'bash', 'sql', 'java', 'c', 'cpp', 'h', 'hpp', 'cs', 'php', 'rb', 'go', 'rs', 'swift', 'kt'].includes(ext);
+        const isCode = ['txt', 'md', 'json', 'js', 'jsx', 'ts', 'tsx', 'py', 'css', 'html', 'xml', 'yaml', 'yml', 'sh', 'bash', 'sql', 'java', 'c', 'cpp', 'h', 'hpp', 'cs', 'php', 'rb', 'go', 'rs', 'swift', 'kt', 'toml', 'ini', 'conf'].includes(ext);
+        const isMedia = ['mp3', 'wav', 'ogg', 'mp4', 'webm', 'mov'].includes(ext);
+        const isDocx = ext === 'docx';
+        const isZip = ext === 'zip';
 
-        if (isImage || isCode) {
+        if (isImage || isCode || isMedia || isDocx || isZip) {
             try {
                 const path = currentPath ? `${currentPath}/${item.name}` : item.name;
 
-                if (isCode) {
+                if (isZip) {
+                    setPreviewItem({ ...item, path: path, type: 'zip' });
+                } else if (isCode) {
                     const response = await api.get(`/files/${path}`, { responseType: 'text' });
                     setPreviewItem({ ...item, content: response.data, type: 'code' });
                 } else {
-                    const response = await api.get(`/files/${path}`, { responseType: 'blob' });
-                    const blob = new Blob([response.data]);
-                    const url = window.URL.createObjectURL(blob);
-                    setPreviewItem({ ...item, blobUrl: url, type: 'image' });
+
+                    if (isDocx) {
+                        const response = await api.get(`/files/${path}`, { responseType: 'blob' });
+                        const blob = new Blob([response.data]);
+                        setPreviewItem({ ...item, blob: blob, type: 'docx' });
+                    } else if (isMedia) {
+                        // Use streaming URL to support seeking and large files
+                        const token = localStorage.getItem('token');
+                        const baseUrl = api.defaults.baseURL || '/api'; // Fallback if not set
+                        // Encode path segments to ensure special chars are handled
+                        const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+                        const url = `${baseUrl}/files/${encodedPath}?token=${token}`;
+
+                        const mediaType = ['mp4', 'webm', 'mov'].includes(ext) ? 'video' : 'audio';
+
+                        // Detect subtitles (vtt files with same basename)
+                        const basename = item.name.substring(0, item.name.lastIndexOf('.'));
+                        const tracks = items
+                            .filter(f => f.name.startsWith(basename) && f.name.endsWith('.vtt'))
+                            .map(f => ({
+                                kind: 'subtitles',
+                                label: f.name.replace(basename, '').replace('.vtt', '').replace(/^[._-]/, '') || 'Default',
+                                srcLang: 'en', // Defaulting to en for now, could parse from filename
+                                src: `${baseUrl}/files/${currentPath ? `${currentPath}/${f.name}` : f.name}?token=${token}`
+                            }));
+
+                        setPreviewItem({ ...item, blobUrl: url, type: 'media', mediaType, tracks, fileId: path });
+                    } else {
+                        const response = await api.get(`/files/${path}`, { responseType: 'blob' });
+                        const blob = new Blob([response.data]);
+                        const url = window.URL.createObjectURL(blob);
+                        setPreviewItem({ ...item, blobUrl: url, type: 'image' });
+                    }
                 }
             } catch (err) {
                 console.error(err);
@@ -1357,6 +1444,50 @@ export default function Dashboard() {
                             <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
                         </button>
 
+                        {/* Search Bar */}
+                        <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1 border border-white/5 focus-within:border-blue-500/50 transition-all shrink-0 md:shrink">
+                            <Search className="w-4 h-4 text-slate-500" />
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Search files..."
+                                className="bg-transparent border-none text-sm text-white placeholder:text-slate-600 focus:ring-0 w-24 md:w-48 lg:w-64"
+                            />
+                            {searchQuery && (
+                                <button onClick={clearSearch} className="p-1 hover:bg-white/10 rounded">
+                                    <X className="w-3 h-3 text-slate-400" />
+                                </button>
+                            )}
+                            <div className="h-4 w-px bg-white/10 mx-1 hidden sm:block" />
+                            <select
+                                value={searchScope}
+                                onChange={(e) => {
+                                    setSearchScope(e.target.value);
+                                    localStorage.setItem('searchScope', e.target.value);
+                                }}
+                                className="bg-transparent border-none text-[10px] uppercase font-bold text-slate-500 focus:ring-0 p-0 cursor-pointer hover:text-slate-300 hidden sm:block"
+                            >
+                                <option value="global" className="bg-slate-900">Global</option>
+                                <option value="scoped" className="bg-slate-900">Scoped</option>
+                            </select>
+                            <div className="h-4 w-px bg-white/10 mx-1 hidden lg:block" />
+                            <select
+                                value={searchLimit}
+                                onChange={(e) => {
+                                    const val = parseInt(e.target.value);
+                                    setSearchLimit(val);
+                                    localStorage.setItem('searchLimit', val);
+                                }}
+                                className="bg-transparent border-none text-[10px] uppercase font-bold text-slate-500 focus:ring-0 p-0 cursor-pointer hover:text-slate-300 hidden lg:block"
+                            >
+                                <option value="10" className="bg-slate-900">10 Res</option>
+                                <option value="50" className="bg-slate-900">50 Res</option>
+                                <option value="100" className="bg-slate-900">100 Res</option>
+                                <option value="0" className="bg-slate-900">No Limit</option>
+                            </select>
+                        </div>
+
                         {/* View Type Toggle */}
                         <div className="flex items-center gap-1 bg-slate-800/50 rounded-lg p-1 shrink-0">
                             <button
@@ -1505,13 +1636,33 @@ export default function Dashboard() {
                             viewSize === 'medium' ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-5' :
                                 'grid-cols-1 md:grid-cols-3 lg:grid-cols-4'
                             }`}>
+                            {isSearching && (
+                                <div className="col-span-full mb-2 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <Search className="w-5 h-5 text-blue-400" />
+                                        <div>
+                                            <p className="text-sm font-medium text-white">Search results for "{searchQuery}"</p>
+                                            <p className="text-xs text-slate-400">
+                                                {items.length} {items.length === 1 ? 'item' : 'items'} found in {searchScope} scope
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={clearSearch}
+                                        className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 rounded-lg transition-colors border border-white/5"
+                                    >
+                                        Clear Search
+                                    </button>
+                                </div>
+                            )}
                             {sortedItems.map((item) => (
                                 <div
-                                    key={item.name}
+                                    key={item.path || item.name}
                                     className="glass-card p-3 md:p-4 group relative flex flex-col items-center text-center cursor-pointer active:scale-95 transition-transform"
                                     onClick={() => {
                                         if (item.is_dir) {
-                                            navigate(item.path);
+                                            if (isSearching) clearSearch();
+                                            navigate('/' + item.path);
                                         } else {
                                             handlePreview(item);
                                         }
@@ -1653,16 +1804,35 @@ export default function Dashboard() {
                                         </tr>
                                     </thead>
                                     <tbody>
+                                        {isSearching && (
+                                            <tr className="bg-blue-500/5 border-b border-blue-500/10">
+                                                <td colSpan="5" className="px-6 py-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <Search className="w-4 h-4 text-blue-400" />
+                                                            <span className="text-xs font-medium text-white">Search results for "{searchQuery}"</span>
+                                                            <span className="text-[10px] text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded uppercase">
+                                                                {items.length} found ({searchScope})
+                                                            </span>
+                                                        </div>
+                                                        <button onClick={clearSearch} className="text-[10px] text-blue-400 hover:underline px-2 py-1">
+                                                            Clear Results
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
                                         {sortedItems.map((item) => (
                                             <tr
-                                                key={item.name}
+                                                key={item.path || item.name}
                                                 className={`group border-b border-white/5 hover:bg-white/5 cursor-pointer transition-colors ${viewSize === 'small' ? 'text-xs' :
                                                     viewSize === 'medium' ? 'text-sm' :
                                                         'text-base'
                                                     }`}
                                                 onClick={() => {
                                                     if (item.is_dir) {
-                                                        navigate(item.path);
+                                                        if (isSearching) clearSearch();
+                                                        navigate('/' + item.path);
                                                     } else {
                                                         handlePreview(item);
                                                     }
@@ -1799,7 +1969,42 @@ export default function Dashboard() {
                             <X className="w-8 h-8" />
                         </button>
 
-                        {previewItem.type === 'image' ? (
+                        {previewItem.type === 'media' ? (
+                            <div className="flex items-center justify-center h-full bg-black rounded-lg overflow-hidden">
+                                <MediaPlayer
+                                    src={previewItem.blobUrl}
+                                    type={previewItem.mediaType}
+                                    title={previewItem.name}
+                                    tracks={previewItem.tracks}
+                                    fileId={previewItem.fileId}
+                                    autoPlay
+                                />
+                            </div>
+                        ) : previewItem.type === 'zip' ? (
+                            <div className="bg-slate-900 rounded-lg p-6 h-auto max-h-[85vh] overflow-hidden flex flex-col border border-white/10">
+                                <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                                    <Folder className="w-6 h-6 text-yellow-500" />
+                                    Archive Content: {previewItem.name}
+                                </h3>
+                                <ZipViewer path={previewItem.path} />
+                            </div>
+                        ) : previewItem.type === 'docx' ? (
+                            <div className="bg-slate-900 rounded-lg h-[85vh] overflow-hidden flex flex-col">
+                                <div className="flex items-center justify-between p-4 border-b border-white/10 bg-slate-800">
+                                    <h3 className="text-lg font-semibold text-white">{previewItem.name}</h3>
+                                    <button
+                                        onClick={() => handleDownload(previewItem.name)}
+                                        className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm flex items-center gap-2"
+                                    >
+                                        <Download className="w-4 h-4" />
+                                        Download Original
+                                    </button>
+                                </div>
+                                <div className="flex-1 overflow-hidden bg-white">
+                                    <DocxViewer blob={previewItem.blob} />
+                                </div>
+                            </div>
+                        ) : previewItem.type === 'image' ? (
                             <img
                                 src={previewItem.blobUrl}
                                 alt={previewItem.name}

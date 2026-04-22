@@ -53,6 +53,7 @@ class UserBase(BaseModel):
     user_level: Optional[str] = "read-write"
     require_password_change: Optional[bool] = False
     is_disabled: Optional[bool] = False
+    storage_quota: Optional[int] = None
 
 class UserCreate(UserBase):
     password: str
@@ -60,6 +61,7 @@ class UserCreate(UserBase):
 
 class User(UserBase):
     id: int
+    used_storage: int = 0
     groups: List[Group] = []
     
     class Config:
@@ -116,4 +118,5 @@ class UserUpdate(BaseModel):
     user_level: Optional[str] = None
     require_password_change: Optional[bool] = None
     is_disabled: Optional[bool] = None
+    storage_quota: Optional[int] = None
     groups: Optional[List[str]] = None  # List of group names to set (replaces existing)

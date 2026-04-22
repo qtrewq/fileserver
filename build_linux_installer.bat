@@ -17,8 +17,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Create temporary packaging directory
-set PACKAGE_NAME=fileserver-linux-1.1.0
+REM Create temporary packagingrem Define variables
+set APP_NAME=fileserver
+
+set /p VERSION=<VERSION
+echo Read version: %VERSION%
+set PACKAGE_NAME=fileserver-linux-%VERSION%
 set TEMP_DIR=temp_linux_package
 set OUTPUT_DIR=installer_output
 
@@ -110,8 +114,8 @@ echo.
 echo METHOD 1: Automated Installation ^(Recommended^)
 echo ------------------------------------------------
 echo 1. Extract this package:
-echo    tar -xzf fileserver-linux-1.1.0.tar.gz
-echo    cd fileserver-linux-1.1.0
+echo    tar -xzf fileserver-linux-%VERSION%.tar.gz
+echo    cd fileserver-linux-%VERSION%
 echo.
 echo 2. Run the installation script as root:
 echo    sudo bash install-linux.sh

@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session, joinedload
 import secrets
-from . import models, schemas, auth
+from . import models, schemas, auth, config
 
 def get_user(db: Session, username: str):
     return db.query(models.User).options(joinedload(models.User.groups)).filter(models.User.username == username).first()
@@ -31,8 +31,21 @@ def create_user(db: Session, user: schemas.UserCreate):
     db.commit()
     db.refresh(db_user)
     
-    if user.groups:
-        update_user_groups(db, db_user, user.groups)
+    db.refresh(db_user)
+    
+    groups_to_add = user.groups
+    if not groups_to_add:
+        # Assign default group if configured
+        try:
+            cfg = config.ServerConfig()
+            default_group = cfg.get("limits", "default_registration_group")
+            if default_group:
+                groups_to_add = [default_group]
+        except Exception as e:
+            print(f"Error assigning default group: {e}")
+
+    if groups_to_add:
+        update_user_groups(db, db_user, groups_to_add)
         
     return db_user
 
@@ -70,6 +83,8 @@ def update_user(db: Session, username: str, user_update: schemas.UserUpdate):
         user.require_password_change = user_update.require_password_change
     if user_update.is_disabled is not None:
         user.is_disabled = user_update.is_disabled
+    if user_update.storage_quota is not None:
+        user.storage_quota = user_update.storage_quota
     
     if user_update.groups is not None:
         update_user_groups(db, user, user_update.groups)
@@ -77,6 +92,15 @@ def update_user(db: Session, username: str, user_update: schemas.UserUpdate):
     db.commit()
     db.refresh(user)
     return user
+
+def update_user_storage_usage(db: Session, username: str, delta_bytes: int):
+    user = get_user(db, username)
+    if user:
+        current = user.used_storage or 0
+        user.used_storage = max(0, current + delta_bytes)
+        db.commit()
+        return user.used_storage
+    return 0
 
 # Group operations
 def get_group(db: Session, group_name: str):

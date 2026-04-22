@@ -15,6 +15,8 @@ class User(Base):
     user_level = Column(String, default="read-write")  # 'read-only', 'read-write', 'admin'
     require_password_change = Column(Boolean, default=False)
     is_disabled = Column(Boolean, default=False)
+    storage_quota = Column(Integer, nullable=True)  # In bytes, None means use default/group
+    used_storage = Column(Integer, default=0)  # In bytes
     groups = relationship("Group", secondary="user_groups", back_populates="users")
 
 class Group(Base):

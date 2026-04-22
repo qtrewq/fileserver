@@ -2,7 +2,7 @@
 ; Download Inno Setup from: https://jrsoftware.org/isdl.php
 
 #define MyAppName "FileServer"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion Trim(FileRead(FileOpen("VERSION")))
 #define MyAppPublisher "FileServer Team"
 #define MyAppURL "https://github.com/qtrewq/fileserver"
 #define MyAppExeName "FileServer.exe"
