@@ -47,6 +47,17 @@ DEFAULT_CONFIG = {
         "password": "password",
         "from_email": "noreply@aqueous.lol",
         "use_tls": True
+    },
+    "cloudflare_auth": {
+        "enabled": True,
+        "team_domain": "aqueousltd.cloudflareaccess.com",
+        "audience": "bdcbf5e1f78b4e128c658b7db265d6197566e50800aa55dda76cd6b4fa0084c5",
+        "login_error_message": "Access is restricted to Cloudflare Access authenticated users."
+    },
+    "cache": {
+        "enabled": False,
+        "path": "./cache",
+        "max_size_gb": 10
     }
 }
 

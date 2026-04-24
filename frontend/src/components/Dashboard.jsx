@@ -63,6 +63,7 @@ export default function Dashboard() {
     const [searchScope, setSearchScope] = useState(localStorage.getItem('searchScope') || 'global'); // 'global' or 'scoped'
     const [searchLimit, setSearchLimit] = useState(parseInt(localStorage.getItem('searchLimit') || '100')); // 0 for unlimited
     const [isSearching, setIsSearching] = useState(false);
+    const [downloadStatus, setDownloadStatus] = useState({ active: false, preparing: false, progress: 0, itemName: '' });
 
     const currentPath = location.pathname.substring(1);
 
@@ -107,6 +108,9 @@ export default function Dashboard() {
             setUser(res.data);
         } catch (err) {
             console.error(err);
+            if (err.response?.status === 401 || err.response?.status === 403) {
+                navigate('/login');
+            }
         }
     };
 
@@ -239,23 +243,53 @@ export default function Dashboard() {
         }
     };
 
-    const handleDownload = async (itemName) => {
+    const handleDownload = async (itemName, isDir = false) => {
         try {
+            setDownloadStatus({ active: true, preparing: true, progress: 0, itemName });
             const path = currentPath ? `${currentPath}/${itemName}` : itemName;
-            const response = await api.get(`/files/${path}`, { responseType: 'blob' });
+            const endpoint = isDir ? `/download-folder/${path}` : `/files/${path}`;
+            
+            const response = await api.get(endpoint, { 
+                responseType: 'blob',
+                onDownloadProgress: (progressEvent) => {
+                    const total = progressEvent.total;
+                    if (total) {
+                        const percent = Math.round((progressEvent.loaded * 100) / total);
+                        setDownloadStatus(prev => ({ ...prev, preparing: false, progress: percent }));
+                    } else {
+                        // If total is unknown, just show that it's downloading
+                        setDownloadStatus(prev => ({ ...prev, preparing: false }));
+                    }
+                }
+            });
 
             // Create a blob URL and trigger download
             const blob = new Blob([response.data]);
             const url = window.URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = itemName;
+            link.download = isDir ? `${itemName}.zip` : itemName;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
             window.URL.revokeObjectURL(url);
         } catch (err) {
-            alert('Download failed');
+            console.error('Download error:', err);
+            let errorMessage = 'Download failed';
+            
+            if (err.response?.data instanceof Blob) {
+                try {
+                    const text = await err.response.data.text();
+                    const errorJson = JSON.parse(text);
+                    errorMessage = errorJson.detail || errorMessage;
+                } catch (e) {}
+            } else {
+                errorMessage = err.response?.data?.detail || errorMessage;
+            }
+            
+            alert(errorMessage);
+        } finally {
+            setDownloadStatus({ active: false, preparing: false, progress: 0, itemName: '' });
         }
     };
 
@@ -1247,31 +1281,27 @@ export default function Dashboard() {
                                 <p className="font-medium text-white truncate">{contextMenu.item.name}</p>
                             </div>
 
-                            {!contextMenu.item.is_dir && (
-                                <>
-                                    {isEditable(contextMenu.item) && (
-                                        <button
-                                            onClick={() => {
-                                                handleEditFile(contextMenu.item);
-                                                setContextMenu(null);
-                                            }}
-                                            className="w-full px-4 py-3 md:py-2 text-left hover:bg-white/10 flex items-center gap-3 text-slate-200 transition-colors active:bg-white/20"
-                                        >
-                                            <Edit className="w-5 h-5 md:w-4 md:h-4" />
-                                            Edit
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={() => {
-                                            handleDownload(contextMenu.item.name);
-                                            setContextMenu(null);
-                                        }}
-                                        className="w-full px-4 py-3 md:py-2 text-left hover:bg-white/10 flex items-center gap-3 text-slate-200 transition-colors active:bg-white/20"
-                                    >
-                                        <Download className="w-5 h-5 md:w-4 md:h-4" />
-                                        Download
-                                    </button>
-                                </>
+                            <button
+                                onClick={() => {
+                                    handleDownload(contextMenu.item.name, contextMenu.item.is_dir);
+                                    setContextMenu(null);
+                                }}
+                                className="w-full px-4 py-3 md:py-2 text-left hover:bg-white/10 flex items-center gap-3 text-slate-200 transition-colors active:bg-white/20"
+                            >
+                                <Download className="w-5 h-5 md:w-4 md:h-4" />
+                                {contextMenu.item.is_dir ? 'Download as ZIP' : 'Download'}
+                            </button>
+                            {!contextMenu.item.is_dir && isEditable(contextMenu.item) && (
+                                <button
+                                    onClick={() => {
+                                        handleEditFile(contextMenu.item);
+                                        setContextMenu(null);
+                                    }}
+                                    className="w-full px-4 py-3 md:py-2 text-left hover:bg-white/10 flex items-center gap-3 text-slate-200 transition-colors active:bg-white/20"
+                                >
+                                    <Edit className="w-5 h-5 md:w-4 md:h-4" />
+                                    Edit
+                                </button>
                             )}
                             {user?.user_level !== 'read-only' && (
                                 <>
@@ -1691,17 +1721,16 @@ export default function Dashboard() {
 
                                     {/* Actions Overlay - Desktop Hover */}
                                     <div className="hidden md:flex absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity space-x-1">
-                                        {!item.is_dir && (
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleDownload(item.name);
-                                                }}
-                                                className="p-1.5 bg-slate-800 hover:bg-blue-600 rounded-lg text-slate-300 hover:text-white transition-colors"
-                                            >
-                                                <Download className="w-3 h-3" />
-                                            </button>
-                                        )}
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDownload(item.name, item.is_dir);
+                                            }}
+                                            className="p-1.5 bg-slate-800 hover:bg-blue-600 rounded-lg text-slate-300 hover:text-white transition-colors"
+                                            title={item.is_dir ? "Download as ZIP" : "Download"}
+                                        >
+                                            <Download className="w-3 h-3" />
+                                        </button>
                                         {user?.user_level !== 'read-only' && (
                                             <>
                                                 <button
@@ -1894,18 +1923,16 @@ export default function Dashboard() {
                                                                 <Edit className="w-3.5 h-3.5" />
                                                             </button>
                                                         )}
-                                                        {!item.is_dir && (
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleDownload(item.name);
-                                                                }}
-                                                                className="p-1.5 hover:bg-blue-600 rounded text-slate-400 hover:text-white transition-colors"
-                                                                title="Download"
-                                                            >
-                                                                <Download className="w-3.5 h-3.5" />
-                                                            </button>
-                                                        )}
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleDownload(item.name, item.is_dir);
+                                                            }}
+                                                            className="p-1.5 hover:bg-blue-600 rounded text-slate-400 hover:text-white transition-colors"
+                                                            title={item.is_dir ? "Download as ZIP" : "Download"}
+                                                        >
+                                                            <Download className="w-3.5 h-3.5" />
+                                                        </button>
                                                         {user?.user_level !== 'read-only' && (
                                                             <>
                                                                 <button
@@ -2028,11 +2055,11 @@ export default function Dashboard() {
                                             </button>
                                         )}
                                         <button
-                                            onClick={() => handleDownload(previewItem.name)}
+                                            onClick={() => handleDownload(previewItem.name, previewItem.is_dir)}
                                             className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm flex items-center gap-2"
                                         >
                                             <Download className="w-4 h-4" />
-                                            Download
+                                            {previewItem.is_dir ? 'Download as ZIP' : 'Download'}
                                         </button>
                                     </div>
                                 </div>
@@ -2211,6 +2238,49 @@ export default function Dashboard() {
                     </div>
                 </div>
             )}
-        </div >
+
+            {/* Download Progress Modal */}
+            {downloadStatus.active && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+                    <div className="bg-slate-900 border border-white/10 rounded-2xl p-8 max-w-sm w-full shadow-2xl text-center space-y-6 animate-in fade-in zoom-in duration-300">
+                        <div className="relative w-20 h-20 mx-auto">
+                            <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full"></div>
+                            <div 
+                                className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"
+                                style={{ animationDuration: downloadStatus.preparing ? '2s' : '1s' }}
+                            ></div>
+                            <Download className="absolute inset-0 m-auto w-8 h-8 text-blue-400" />
+                        </div>
+                        
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">
+                                {downloadStatus.preparing ? 'Preparing Download' : 'Downloading'}
+                            </h3>
+                            <p className="text-slate-400 text-sm truncate px-4">
+                                {downloadStatus.itemName}
+                            </p>
+                        </div>
+
+                        {!downloadStatus.preparing && (
+                            <div className="space-y-2">
+                                <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+                                    <div 
+                                        className="h-full bg-blue-500 transition-all duration-300 ease-out"
+                                        style={{ width: `${downloadStatus.progress}%` }}
+                                    ></div>
+                                </div>
+                                <p className="text-blue-400 font-bold">{downloadStatus.progress}%</p>
+                            </div>
+                        )}
+
+                        {downloadStatus.preparing && (
+                            <p className="text-slate-500 text-sm animate-pulse">
+                                Bundling files on server... This may take a moment for large folders.
+                            </p>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
     );
 }

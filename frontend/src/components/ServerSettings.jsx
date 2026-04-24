@@ -119,7 +119,8 @@ const ServerSettings = () => {
         { id: 'server', label: 'Server', icon: Settings },
         { id: 'security', label: 'Security', icon: Shield },
         { id: 'storage', label: 'Storage', icon: HardDrive },
-        { id: 'features', label: 'Features', icon: Zap },
+        { id: 'cache', label: 'SSD Cache', icon: Zap },
+        { id: 'features', label: 'Features', icon: Shield },
         { id: 'limits', label: 'Limits', icon: AlertTriangle },
         { id: 'email', label: 'Email', icon: Mail },
     ];
@@ -279,6 +280,54 @@ const ServerSettings = () => {
                                     className="input-field"
                                 />
                                 <p className="text-xs text-slate-500 mt-1">User session timeout duration</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'cache' && (
+                    <div className="space-y-6 animate-fade-in">
+                        <div>
+                            <h3 className="text-lg font-medium text-white mb-1">SSD Cache Settings</h3>
+                            <p className="text-sm text-slate-400">Configure SSD caching for frequently used files to speed up transfers.</p>
+                        </div>
+
+                        <div className="grid gap-6 max-w-2xl">
+                            <div className="flex items-center space-x-3 p-4 bg-white/5 rounded-lg border border-white/5 hover:bg-white/10 transition-colors">
+                                <input
+                                    type="checkbox"
+                                    checked={config.cache?.enabled || false}
+                                    onChange={(e) => updateConfig('cache', 'enabled', e.target.checked)}
+                                    className="rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 w-5 h-5"
+                                />
+                                <div>
+                                    <span className="text-sm font-medium text-slate-200 block">Enable SSD Caching</span>
+                                    <span className="text-xs text-slate-500">Speed up access to common files by storing them on a fast drive</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Cache Path</label>
+                                <input
+                                    type="text"
+                                    value={config.cache?.path || ''}
+                                    onChange={(e) => updateConfig('cache', 'path', e.target.value)}
+                                    placeholder="E:\fileserver_cache"
+                                    className="input-field"
+                                />
+                                <p className="text-xs text-slate-500 mt-1">Full path on the server for the SSD cache (e.g., on an NVMe drive). Requires restart.</p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Max Cache Size (GB)</label>
+                                <input
+                                    type="number"
+                                    value={config.cache?.max_size_gb || 10}
+                                    onChange={(e) => updateConfig('cache', 'max_size_gb', parseInt(e.target.value))}
+                                    min="1"
+                                    className="input-field"
+                                />
+                                <p className="text-xs text-slate-500 mt-1">Maximum storage space to use for the cache. Older files are evicted as needed.</p>
                             </div>
                         </div>
                     </div>

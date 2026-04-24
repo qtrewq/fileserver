@@ -4,6 +4,9 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import os
 import secrets
+import requests
+import time
+from . import config
 
 # Security Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
@@ -79,6 +82,73 @@ def verify_token(token: str) -> Optional[dict]:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
     except JWTError:
+        return None
+
+# Cloudflare Access JWT Verification
+_cloudflare_jwks = None
+_cloudflare_certs_last_fetched = 0
+CERTS_CACHE_TTL = 3600 # 1 hour
+
+def get_cloudflare_jwks(team_domain: str):
+    global _cloudflare_jwks, _cloudflare_certs_last_fetched
+    
+    now = time.time()
+    if _cloudflare_jwks and (now - _cloudflare_certs_last_fetched < CERTS_CACHE_TTL):
+        return _cloudflare_jwks
+        
+    try:
+        url = f"https://{team_domain}/cdn-cgi/access/certs"
+        response = requests.get(url)
+        response.raise_for_status()
+        _cloudflare_jwks = response.json()
+        _cloudflare_certs_last_fetched = now
+        return _cloudflare_jwks
+    except Exception as e:
+        print(f"Error fetching Cloudflare JWKS: {e}")
+        return None
+
+def verify_cloudflare_token(token: str) -> Optional[dict]:
+    """
+    Verify a Cloudflare Access JWT.
+    Strictly verifies audience, issuer, and signature.
+    """
+    cfg = config.get_config()
+    enabled = cfg.get("cloudflare_auth", "enabled", False)
+    if not enabled:
+        return None
+        
+    team_domain = cfg.get("cloudflare_auth", "team_domain")
+    audience = cfg.get("cloudflare_auth", "audience")
+    
+    if not team_domain or not audience:
+        print("Cloudflare Auth enabled but missing domain or audience")
+        return None
+        
+    jwks = get_cloudflare_jwks(team_domain)
+    if not jwks:
+        return None
+        
+    try:
+        # The jose library can find the correct key from JWKS if we pass it correctly
+        # or we might need to find the kid from header manually.
+        # jwt.decode with a key set usually handles this.
+        
+        # Verify issuer (Cloudflare issuer is https://<domain>)
+        issuer = f"https://{team_domain}"
+        
+        payload = jwt.decode(
+            token, 
+            jwks, 
+            algorithms=["RS256"], 
+            audience=audience, 
+            issuer=issuer
+        )
+        return payload
+    except JWTError as e:
+        print(f"Cloudflare JWT Verification failed: {e}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error during Cloudflare JWT verification: {e}")
         return None
 
 def is_account_locked(username: str) -> bool:

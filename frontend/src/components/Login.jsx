@@ -17,8 +17,21 @@ export default function Login() {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [loading, setLoading] = useState(false);
+    const [authConfig, setAuthConfig] = useState({ cloudflare_enabled: false, login_error_message: '' });
 
     const navigate = useNavigate();
+
+    useEffect(() => {
+        const fetchAuthConfig = async () => {
+            try {
+                const response = await api.get('/public/auth-config');
+                setAuthConfig(response.data);
+            } catch (err) {
+                console.error("Failed to fetch auth config:", err);
+            }
+        };
+        fetchAuthConfig();
+    }, []);
 
     useEffect(() => {
         try {
@@ -256,155 +269,172 @@ export default function Login() {
                         </div>
                     )}
 
-                    {/* Form */}
-                    <form onSubmit={handleSubmit} className="space-y-5">
-                        {/* Username Field */}
-                        {ui.showUsername && (
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                                    <User className="w-4 h-4 text-blue-400" />
-                                    {mode === 'login' ? 'Username or Email' : 'Username'}
-                                </label>
-                                <div className="relative group">
-                                    <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                                    <input
-                                        type="text"
-                                        value={username}
-                                        onChange={(e) => setUsername(e.target.value)}
-                                        className="input-field relative"
-                                        placeholder={mode === 'login' ? 'Enter username or email' : 'Enter your username'}
-                                        required
-                                        disabled={loading}
-                                    />
-                                    {mode === 'register' && (
-                                        <div className="absolute right-3 top-3 text-xs text-slate-500 pointer-events-none">
-                                            {username && `/users/${username}`}
+                    {/* Form or Cloudflare Message */}
+                    {authConfig.cloudflare_enabled ? (
+                        <div className="space-y-6 text-center animate-fade-in">
+                            <div className="bg-blue-500/10 border border-blue-500/30 p-6 rounded-2xl backdrop-blur-md">
+                                <Shield className="w-12 h-12 text-blue-400 mx-auto mb-4" />
+                                <h2 className="text-xl font-semibold text-slate-200 mb-2">Cloudflare Access Required</h2>
+                                <p className="text-slate-400 text-sm leading-relaxed">
+                                    {authConfig.login_error_message}
+                                </p>
+                            </div>
+                            <p className="text-xs text-slate-500">
+                                If you are seeing this message, please ensure you are accessing this server through your Cloudflare Access gateway.
+                            </p>
+                        </div>
+                    ) : (
+                        <>
+                            <form onSubmit={handleSubmit} className="space-y-5">
+                                {/* Username Field */}
+                                {ui.showUsername && (
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                                            <User className="w-4 h-4 text-blue-400" />
+                                            {mode === 'login' ? 'Username or Email' : 'Username'}
+                                        </label>
+                                        <div className="relative group">
+                                            <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                            <input
+                                                type="text"
+                                                value={username}
+                                                onChange={(e) => setUsername(e.target.value)}
+                                                className="input-field relative"
+                                                placeholder={mode === 'login' ? 'Enter username or email' : 'Enter your username'}
+                                                required
+                                                disabled={loading}
+                                            />
+                                            {mode === 'register' && (
+                                                <div className="absolute right-3 top-3 text-xs text-slate-500 pointer-events-none">
+                                                    {username && `/users/${username}`}
+                                                </div>
+                                            )}
                                         </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
+                                    </div>
+                                )}
 
-                        {/* Email Field */}
-                        {ui.showEmail && (
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                                    <Mail className="w-4 h-4 text-green-400" />
-                                    Email
-                                </label>
-                                <div className="relative group">
-                                    <div className="absolute inset-0 bg-gradient-to-r from-green-500/20 to-emerald-500/20 rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                                    <input
-                                        type="email"
-                                        value={email}
-                                        onChange={(e) => setEmail(e.target.value)}
-                                        className="input-field relative"
-                                        placeholder="Enter your email"
-                                        required
-                                        disabled={loading}
-                                    />
-                                </div>
-                            </div>
-                        )}
+                                {/* Email Field */}
+                                {ui.showEmail && (
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                                            <Mail className="w-4 h-4 text-green-400" />
+                                            Email
+                                        </label>
+                                        <div className="relative group">
+                                            <div className="absolute inset-0 bg-gradient-to-r from-green-500/20 to-emerald-500/20 rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                            <input
+                                                type="email"
+                                                value={email}
+                                                onChange={(e) => setEmail(e.target.value)}
+                                                className="input-field relative"
+                                                placeholder="Enter your email"
+                                                required
+                                                disabled={loading}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
 
-                        {/* Password Field */}
-                        {ui.showPassword && (
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                                    <Lock className="w-4 h-4 text-purple-400" />
-                                    Password
-                                </label>
-                                <div className="relative group">
-                                    <div className="absolute inset-0 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                                    <input
-                                        type="password"
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
-                                        className="input-field relative"
-                                        placeholder="Enter your password"
-                                        required
-                                        disabled={loading}
-                                    />
-                                    {mode === 'register' && (
-                                        <p className="text-xs text-slate-500 mt-1 ml-1">Min 8 chars, 1 uppercase, 1 special</p>
-                                    )}
-                                </div>
-                            </div>
-                        )}
+                                {/* Password Field */}
+                                {ui.showPassword && (
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                                            <Lock className="w-4 h-4 text-purple-400" />
+                                            Password
+                                        </label>
+                                        <div className="relative group">
+                                            <div className="absolute inset-0 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                            <input
+                                                type="password"
+                                                value={password}
+                                                onChange={(e) => setPassword(e.target.value)}
+                                                className="input-field relative"
+                                                placeholder="Enter your password"
+                                                required
+                                                disabled={loading}
+                                            />
+                                            {mode === 'register' && (
+                                                <p className="text-xs text-slate-500 mt-1 ml-1">Min 8 chars, 1 uppercase, 1 special</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
 
-                        {/* Confirm Password Field */}
-                        {ui.showConfirm && (
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                                    <Lock className="w-4 h-4 text-pink-400" />
-                                    Confirm Password
-                                </label>
-                                <div className="relative group">
-                                    <div className="absolute inset-0 bg-gradient-to-r from-pink-500/20 to-red-500/20 rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                                    <input
-                                        type="password"
-                                        value={confirmPassword}
-                                        onChange={(e) => setConfirmPassword(e.target.value)}
-                                        className="input-field relative"
-                                        placeholder="Confirm your password"
-                                        required
-                                        disabled={loading}
-                                    />
-                                </div>
-                            </div>
-                        )}
+                                {/* Confirm Password Field */}
+                                {ui.showConfirm && (
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                                            <Lock className="w-4 h-4 text-pink-400" />
+                                            Confirm Password
+                                        </label>
+                                        <div className="relative group">
+                                            <div className="absolute inset-0 bg-gradient-to-r from-pink-500/20 to-red-500/20 rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                            <input
+                                                type="password"
+                                                value={confirmPassword}
+                                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                                className="input-field relative"
+                                                placeholder="Confirm your password"
+                                                required
+                                                disabled={loading}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
 
-                        {/* Forgot Password Link */}
-                        {ui.showForgot && (
-                            <div className="flex justify-end">
+                                {/* Forgot Password Link */}
+                                {ui.showForgot && (
+                                    <div className="flex justify-end">
+                                        <button
+                                            type="button"
+                                            onClick={() => switchMode('forgot')}
+                                            className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                                        >
+                                            Forgot password?
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Submit Button */}
                                 <button
-                                    type="button"
-                                    onClick={() => switchMode('forgot')}
-                                    className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                                    type="submit"
+                                    disabled={loading}
+                                    className="w-full py-3.5 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white rounded-xl font-semibold transition-all duration-300 active:scale-95 shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 group mt-6"
                                 >
-                                    Forgot password?
+                                    {loading && (
+                                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                    )}
+                                    {!loading && ui.button}
+                                    {!loading && <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />}
                                 </button>
+                            </form>
+
+                            {/* Switcher */}
+                            <div className="mt-6 text-center border-t border-white/10 pt-4">
+                                {mode === 'login' ? (
+                                    <p className="text-sm text-slate-400">
+                                        Don't have an account?{' '}
+                                        <button onClick={() => switchMode('register')} className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
+                                            Sign Up
+                                        </button>
+                                    </p>
+                                ) : mode === 'reset' ? (
+                                    <p className="text-sm text-slate-400">
+                                        <button onClick={() => switchMode('login')} className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
+                                            Back to Login
+                                        </button>
+                                    </p>
+                                ) : (
+                                    <p className="text-sm text-slate-400">
+                                        Already have an account?{' '}
+                                        <button onClick={() => switchMode('login')} className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
+                                            Sign In
+                                        </button>
+                                    </p>
+                                )}
                             </div>
-                        )}
-
-                        {/* Submit Button */}
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full py-3.5 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white rounded-xl font-semibold transition-all duration-300 active:scale-95 shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 group mt-6"
-                        >
-                            {loading && (
-                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                            )}
-                            {!loading && ui.button}
-                            {!loading && <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />}
-                        </button>
-                    </form>
-
-                    {/* Switcher */}
-                    <div className="mt-6 text-center border-t border-white/10 pt-4">
-                        {mode === 'login' ? (
-                            <p className="text-sm text-slate-400">
-                                Don't have an account?{' '}
-                                <button onClick={() => switchMode('register')} className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
-                                    Sign Up
-                                </button>
-                            </p>
-                        ) : mode === 'reset' ? (
-                            <p className="text-sm text-slate-400">
-                                <button onClick={() => switchMode('login')} className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
-                                    Back to Login
-                                </button>
-                            </p>
-                        ) : (
-                            <p className="text-sm text-slate-400">
-                                Already have an account?{' '}
-                                <button onClick={() => switchMode('login')} className="text-blue-400 hover:text-blue-300 font-medium transition-colors">
-                                    Sign In
-                                </button>
-                            </p>
-                        )}
-                    </div>
+                        </>
+                    )}
                 </div>
 
                 {/* Footer */}

@@ -2,7 +2,7 @@
   "server": {
     "port": 30815,
     "host": "0.0.0.0",
-    "public_url": "http://file.aqueous.lol",
+    "public_url": "http://files.aqueous.lol",
     "reload": true
   },
   "security": {
@@ -36,5 +36,16 @@
     "password": "yeau bibw ybur cafo ",
     "from_email": "noreply@aqueous.lol",
     "use_tls": true
+  },
+  "cloudflare_auth": {
+    "enabled": true,
+    "team_domain": "aqueousltd.cloudflareaccess.com",
+    "audience": "bdcbf5e1f78b4e128c658b7db265d6197566e50800aa55dda76cd6b4fa0084c5",
+    "login_error_message": "Access is restricted to Cloudflare Access authenticated users."
+  },
+  "cache": {
+    "enabled": true,
+    "path": "D:\\filecache",
+    "max_size_gb": 100
   }
 }

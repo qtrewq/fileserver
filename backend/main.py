@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import shutil
 from typing import List
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request
@@ -9,6 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from starlette.responses import FileResponse, HTMLResponse, StreamingResponse
 import mimetypes
+import secrets
+import tempfile
+import zipfile
+from starlette.background import BackgroundTasks
+from urllib.parse import quote
+from .cache_manager import CacheManager
 
 from . import models, schemas, crud, database, auth, config, email_utils
 from .range_utils import range_requests_response
@@ -109,6 +116,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize Cache Manager
+cfg = config.get_config()
+cache_mgr = CacheManager(
+    cache_path=cfg.get("cache", "path", "./cache"),
+    max_size_gb=cfg.get("cache", "max_size_gb", 10),
+    enabled=cfg.get("cache", "enabled", False)
+)
+
 # Database
 database.Base.metadata.create_all(bind=database.engine)
 
@@ -126,15 +141,97 @@ def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ):
-    # Try getting token from query string if not in header
-    if not token:
-        token = request.query_params.get("token")
+    cfg = config.get_config()
+    cf_enabled = cfg.get("cloudflare_auth", "enabled", False)
+    cf_token = request.headers.get("Cf-Access-Jwt-Assertion")
     
+    # Standard Credentials Exception
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    if cf_enabled and cf_token:
+        # Verify Cloudflare JWT
+        payload = auth.verify_cloudflare_token(cf_token)
+        if payload is None:
+            raise credentials_exception
+        
+        email = payload.get("email")
+        if not email:
+            raise credentials_exception
+            
+        # Extract groups - Cloudflare sends them in different ways depending on setup
+        # Usually it's in the 'groups' claim or 'ext' -> 'groups'
+        cf_groups = payload.get("groups", [])
+        
+        user = crud.get_user_by_email(db, email)
+        
+        if not user:
+            # Auto-create user
+            # Username will be everything before @ in email
+            base_username = email.split('@')[0]
+            username = base_username
+            # Check for conflict
+            counter = 1
+            while crud.get_user(db, username):
+                username = f"{base_username}_{counter}"
+                counter += 1
+                
+            from . import schemas
+            user_data = schemas.UserCreate(
+                username=username,
+                password=secrets.token_urlsafe(32), # Unused
+                email=email,
+                root_path=f"/users/{username}",
+                is_admin=False,
+                is_super_admin=False,
+                user_level="read-write",
+                require_password_change=False,
+                groups=[] # Initially empty
+            )
+            user = crud.create_user(db, user_data)
+            
+            # Create physical folder
+            storage_root = os.getenv("STORAGE_ROOT", "./storage")
+            user_physical_path = os.path.join(storage_root, "users", username)
+            os.makedirs(user_physical_path, exist_ok=True)
+            
+            print(f"Auto-created Cloudflare user: {email} as {username}")
+
+        # Update Groups if any from Cloudflare
+        if cf_groups:
+            # Sync groups locally - create if not exist but with NO permissions
+            current_local_groups = {g.name for g in user.groups}
+            for group_name in cf_groups:
+                if group_name not in current_local_groups:
+                    # Check if group exists
+                    group = crud.get_group(db, group_name)
+                    if not group:
+                        # Create group with restrictive defaults
+                        from . import schemas
+                        crud.create_group(db, schemas.GroupCreate(
+                            name=group_name,
+                            description=f"Auto-created from Cloudflare group: {group_name}",
+                            default_permission="none",
+                            can_upload=False,
+                            can_download=False,
+                            can_delete=False,
+                            can_share=False,
+                            can_create_folders=False
+                        ))
+                        print(f"Auto-created Cloudflare group locally: {group_name}")
+            
+            # Map user to these groups
+            crud.update_user_groups(db, user, cf_groups)
+            
+        return user
+
+    # Fallback to local JWT logic
+    # Try getting token from query string if not in header
+    if not token:
+        token = request.query_params.get("token")
     
     if not token:
         raise credentials_exception
@@ -222,6 +319,58 @@ def get_safe_path(user: models.User, path: str = ""):
         raise HTTPException(status_code=403, detail="[ERR_ACCESS_DENIED] Access denied: Path traversal detected")
     
     return full_path
+
+def resolve_path(db: Session, current_user: models.User, path: str):
+    """Resolve a path, checking both user's storage and shared items."""
+    safe_path = None
+    try:
+        safe_path = get_safe_path(current_user, path)
+    except:
+        pass
+
+    if not safe_path or not os.path.exists(safe_path):
+        # Check shares
+        # Try exact match first
+        share = db.query(models.FolderShare).filter(
+            models.FolderShare.shared_with_username == current_user.username,
+            models.FolderShare.folder_path == path
+        ).first()
+        
+        if not share:
+            # Check if this is a sub-path of a shared folder
+            path_parts = path.split("/")
+            for i in range(len(path_parts)):
+                prefix = "/".join(path_parts[:i+1])
+                share = db.query(models.FolderShare).filter(
+                    models.FolderShare.shared_with_username == current_user.username,
+                    models.FolderShare.folder_path == prefix
+                ).first()
+                if share:
+                    break
+        
+        if share:
+            owner = crud.get_user(db, share.owner_username)
+            if owner:
+                try:
+                    # If it's a sub-path, we need to map it correctly
+                    if share.folder_path != path:
+                        rel_to_share = os.path.relpath(path, start=share.folder_path)
+                        actual_path = os.path.join(share.folder_path, rel_to_share)
+                    else:
+                        actual_path = share.folder_path
+                        
+                    safe_path = get_safe_path(owner, actual_path)
+                except:
+                    pass
+    return safe_path
+
+@app.get("/api/public/auth-config")
+def get_auth_config():
+    cfg = config.get_config()
+    return {
+        "cloudflare_enabled": cfg.get("cloudflare_auth", "enabled", False),
+        "login_error_message": cfg.get("cloudflare_auth", "login_error_message", "Access restricted.")
+    }
 
 # --- Auth Endpoints ---
 @app.post("/api/token")
@@ -829,25 +978,7 @@ def search_files(
 
 @app.get("/api/files/{path:path}")
 def list_or_get_file(request: Request, path: str = "", db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    safe_path = None
-    try:
-        safe_path = get_safe_path(current_user, path)
-    except:
-        pass
-
-    if not safe_path or not os.path.exists(safe_path):
-        share = db.query(models.FolderShare).filter(
-            models.FolderShare.shared_with_username == current_user.username,
-            models.FolderShare.folder_path == path,
-            models.FolderShare.is_file == True
-        ).first()
-        if share:
-            owner = crud.get_user(db, share.owner_username)
-            if owner:
-                try:
-                    safe_path = get_safe_path(owner, path)
-                except:
-                    pass
+    safe_path = resolve_path(db, current_user, path)
 
     if not safe_path or not os.path.exists(safe_path):
          raise HTTPException(status_code=404, detail="[ERR_NOT_FOUND] File or directory not found")
@@ -884,13 +1015,93 @@ def list_or_get_file(request: Request, path: str = "", db: Session = Depends(get
             raise HTTPException(status_code=500, detail=f"[ERR_LIST_DIR] Failed to list directory: {str(e)}")
             
     elif os.path.isfile(safe_path):
+        # Check cache
+        serving_path = cache_mgr.get_cached_path(safe_path) or safe_path
+        
         return range_requests_response(
             request, 
-            file_path=safe_path, 
+            file_path=serving_path, 
             content_type=mimetypes.guess_type(safe_path)[0]
         )
     else:
         raise HTTPException(status_code=404, detail="[ERR_NOT_FOUND] File or directory not found")
+
+@app.get("/api/download-folder/{path:path}")
+def download_folder(
+    path: str = "",
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Zip and download a folder"""
+    # Check permission
+    try:
+        auth.check_permission(current_user, 'can_download')
+    except HTTPException:
+        raise HTTPException(status_code=403, detail="Download permission denied")
+
+    safe_path = resolve_path(db, current_user, path)
+    
+    if not safe_path or not os.path.exists(safe_path):
+        raise HTTPException(status_code=404, detail="Folder not found")
+        
+    if not os.path.isdir(safe_path):
+        raise HTTPException(status_code=400, detail="Requested path is not a directory")
+
+    folder_name = os.path.basename(safe_path) or "download"
+    zip_filename = f"{folder_name}.zip"
+
+    # Use a temporary file for the ZIP
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    tmp_path = tmp_file.name
+    tmp_file.close()
+
+    print(f"DEBUG: Starting ZIP creation for {safe_path} -> {tmp_path}")
+
+    def remove_file(path: str):
+        try:
+            os.remove(path)
+            print(f"DEBUG: Removed temp file {path}")
+        except Exception as e:
+            print(f"DEBUG: Error removing temp file {path}: {e}")
+
+    try:
+        start_time = time.time()
+        # Use ZIP_STORED (no compression) for speed, especially for large folders.
+        # allowZip64=True is REQUIRED for folders larger than 4GB.
+        with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_STORED, allowZip64=True) as zipf:
+            file_count = 0
+            total_size = 0
+            for root, dirs, files in os.walk(safe_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, start=safe_path)
+                    file_size = os.path.getsize(file_path)
+                    zipf.write(file_path, arcname)
+                    file_count += 1
+                    total_size += file_size
+                    
+        duration = time.time() - start_time
+        print(f"DEBUG: ZIP created successfully in {duration:.2f}s. Files: {file_count}, Total Size: {total_size / (1024*1024):.2f}MB")
+    except Exception as e:
+        print(f"DEBUG: ZIP creation error: {e}")
+        remove_file(tmp_path)
+        raise HTTPException(status_code=500, detail=f"Failed to create ZIP: {str(e)}")
+
+    background_tasks = BackgroundTasks()
+    background_tasks.add_task(remove_file, tmp_path)
+
+    # Encode filename for Content-Disposition header
+    encoded_filename = quote(zip_filename)
+    headers = {
+        'Content-Disposition': f'attachment; filename*=UTF-8\'\'{encoded_filename}'
+    }
+
+    return FileResponse(
+        tmp_path,
+        media_type="application/zip",
+        headers=headers,
+        background=background_tasks
+    )
 
 @app.post("/api/upload/{path:path}")
 async def upload_files(
@@ -1686,20 +1897,27 @@ def startup_event():
         print("Created super_admins group")
     
     # Create admin user if it doesn't exist
-    user = crud.get_user(db, "admin")
+    admin_email = "jhmgallagher2009@gmail.com"
+    user = db.query(models.User).filter(models.User.username == "admin").first()
     if not user:
         user = crud.create_user(db, schemas.UserCreate(
             username="admin",
-            password="adminpassword",
+            password=secrets.token_urlsafe(32),
             root_path="/",
+            email=admin_email,
             is_admin=True,
             is_super_admin=True,
-            require_password_change=False,  # Force password change on first login
-            groups=["super_admins"]  # Add to super_admins group
+            require_password_change=False,
+            groups=["super_admins"]
         ))
-        print("Created default admin user (username: admin, password: adminpassword)")
-        print("IMPORTANT: You must change the admin password on first login!")
+        print(f"Created default admin user mapped to {admin_email}")
     else:
+        # Ensure email is correct
+        if user.email != admin_email:
+            user.email = admin_email
+            db.commit()
+            print(f"Verified admin mapping to {admin_email}")
+            
         # Ensure existing admin user is in super_admins group
         if super_admin_group not in user.groups:
             user.groups.append(super_admin_group)
